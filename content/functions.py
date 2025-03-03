@@ -2,11 +2,11 @@ import os
 import subprocess
 import datetime
 
-def backup_mysql_database(host, user, password, db_name, backup_dir):
-    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+def backup_mysql_database(password, db_name, backup_dir):
+    timestamp = datetime.datetime.now().strftime('%YYYY%mm%d%H%M')
     backup_file = os.path.join(backup_dir, f"{db_name}_backup_{timestamp}.txt")
     
-    command = f"mysqldump -h {host} -u {user} -p{password} {db_name} > {backup_file}"
+    command = f"mysqldump -e -R -u root -p {password} {db_name} > {backup_file}"
     try:
         subprocess.run(command, shell=True, check=True)
         print(f"Backup of MySQL database '{db_name}' completed successfully.")
