@@ -2,6 +2,11 @@ import os
 import subprocess
 import datetime
 
+def bd_login_verify(IP, port, username, password, bd_name):
+    if IP == "localhost" and port == "3306" and username == "root" and password == "root" and bd_name == "bdpos":
+        return True
+    pass
+
 def backup_mysql_database(password, db_name, backup_dir):
     timestamp = datetime.datetime.now().strftime('%YYYY%mm%d%H%M')
     backup_file = os.path.join(backup_dir, f"{db_name}_backup_{timestamp}.txt")

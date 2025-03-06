@@ -1,11 +1,5 @@
-"""def main():
-    # Your main code here
-    print("Hello, world!")
-
-if __name__ == "__main__":
-    main()"""
-
-from views.views import create_login_interface
+from content.views import create_login_interface
+from content.encrypt import encrypt, decrypt
 
 if __name__ == "__main__":
     create_login_interface()
