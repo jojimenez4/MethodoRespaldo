@@ -41,9 +41,17 @@ def create_login_interface():
     username_entry.insert(0, "root")  # Usuario por defecto
     username_entry.pack(pady=5)
 
+    # Contenedor para los botones
+    button_frame = customtkinter.CTkFrame(frame)
+    button_frame.pack(pady=20)
+
+
     # Botón para iniciar sesión
-    login_button = customtkinter.CTkButton(frame, text="Conectar", command=lambda: open_selection_interface(login_window))
-    login_button.pack(pady=20)
+    login_button = customtkinter.CTkButton(button_frame, text="Conectar", command=lambda: open_selection_interface(login_window))
+    login_button.pack(side="left", padx=10)
+
+    cancel_button = customtkinter.CTkButton(button_frame, text="Cancelar", command=lambda: open_selection_interface(login_window))
+    cancel_button.pack(side="left", padx=10)
 
     login_window.mainloop()
 
@@ -61,25 +69,32 @@ def open_selection_interface(login_window):
     label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16))
     label.pack(pady=12, padx=10)
 
-    # Etiqueta carpeta destino
-    def update_label():
-        folder = filedialog.askdirectory()
-        if folder:
-            result_label.config(text=f"Destino seleccionado: {folder}")
-            return folder
-        else:
-            result_label.config(text="No se seleccionó carpeta")
-            return None
+    # Etiqueta y campo para el archivo de origen
+    source_label = customtkinter.CTkLabel(frame, text="Archivo de Origen:")
+    source_label.pack(pady=5)
+    source_entry = customtkinter.CTkEntry(frame, width=300)
+    source_entry.pack(side="left", pady=5, padx=5)
+    source_button = customtkinter.CTkButton(frame, text="Browse", command=lambda: browse_file(source_entry))
+    source_button.pack(side="left", pady=5, padx=5)
 
-    # Botón selección de archivo
-    folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label)
-    folder_button.pack(pady=10)
-
-    # Etiqueta para el resultado
-    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12))
-    result_label.pack(pady=10)
+    # Etiqueta y campo para el archivo de destino
+    dest_label = customtkinter.CTkLabel(frame, text="Archivo de Destino:")
+    dest_label.pack(pady=5)
+    dest_entry = customtkinter.CTkEntry(frame, width=300)
+    dest_entry.pack(side="left", pady=5, padx=5)
+    dest_button = customtkinter.CTkButton(frame, text="Browse", command=lambda: browse_file(dest_entry))
+    dest_button.pack(side="left", pady=5, padx=5)
 
     root.mainloop()
+
+def browse_file(entry):
+    """Abre un cuadro de diálogo para seleccionar un archivo y muestra la ruta en el campo de entrada."""
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        entry.delete(0, customtkinter.END)
+        entry.insert(0, file_path)   
+
+
 
 # Llama a la función para crear la interfaz de inicio de sesión
 create_login_interface()
