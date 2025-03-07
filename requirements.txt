@@ -3,9 +3,11 @@ charset-normalizer==3.4.1
 customtkinter==5.2.2
 darkdetect==0.8.0
 idna==3.10
+mysql-connector-python==9.2.0
 Naked==0.1.32
 packaging==24.2
 pycryptodome==3.21.0
+pyodbc==5.2.0
 PyYAML==6.0.2
 requests==2.32.3
 shellescape==3.8.1

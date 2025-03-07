@@ -3,7 +3,7 @@ import customtkinter
 from tkinter import filedialog
 # import mysql.connector
 from tkinter import messagebox
-from content.encrypt import encrypt, decrypt
+import content.functions as f
 
 def create_login_interface():
     customtkinter.set_appearance_mode("dark")
@@ -49,27 +49,41 @@ def create_login_interface():
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
-    
-    # Importar las funciones de encrypt.py
-    def login():
+
+    # Función para verificar el inicio de sesión
+    def verify_login():
         try:
+            server_ip = server_name_entry.get()
+            port = int(port_entry.get())
+            username = username_entry.get()
             password = password_entry.get().encode("utf-8")
-            key = "generate_key()".encode("utf-8")
-            encrypted_password = encrypt(key, password)
-            decrypted_password = decrypt(key, encrypted_password)
-            open_selection_interface(login_window)
-            return decrypted_password
+            key = f.KEY
+            encrypted_password = f.encrypt(key, password)
+            server_type_selected = server_type.get()
+
+            # Llama a la función correspondiente según el tipo de servidor seleccionado
+            if server_type_selected == "MySQL Server (TCP/IP)":
+                if f.bd_login_verify_mysql(server_ip, port, username, encrypted_password):
+                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
+                    open_selection_interface(login_window)
+                else:
+                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                if f.bd_login_verify_sql_server(server_ip, port, username, encrypted_password):
+                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
+                    open_selection_interface(login_window)
+                else:
+                    messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
+            else:
+                messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
-            messagebox.showerror("Error", f"Error durante la encriptación/desencriptación: {e}")
-            print(f"Error during encryption/decryption: {e}")
-            
+            messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
 
-    password_entry.bind("<Return>", lambda event: login())
-
-
-    # Botón para iniciar sesión
-    login_button = customtkinter.CTkButton(frame, text="Conectar", command=lambda: login())
+    # Asigna la función verify_login al botón de inicio de sesión
+    login_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_login)
     login_button.pack(pady=20)
+
+    password_entry.bind("<Return>", lambda event: verify_login())
 
     login_window.mainloop()
 
@@ -116,7 +130,7 @@ def open_selection_interface(login_window):
     root.grab_set()
     root.mainloop()
 
-    
+
 
 
 
