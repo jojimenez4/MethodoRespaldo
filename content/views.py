@@ -145,10 +145,6 @@ def open_selection_interface(server_window):
     def update_label():
         folder = filedialog.askdirectory()
         if folder:
-            result_label.configure(text=f"Destino seleccionado: {folder}")
-            rounded_label.configure(text=folder)
-            return folder
-        else:
             result_label.configure(text="No se seleccionó carpeta")
             rounded_label.configure(text="")
             return None
