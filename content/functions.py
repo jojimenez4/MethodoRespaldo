@@ -9,6 +9,7 @@ import mysql.connector
 import pyodbc
 
 KEY = b"METHODO_PROVIDENCIA2025"  # encryption key
+user = ["root", "sa"]
 
 def encrypt(key, source, encode=True):
     key = SHA256.new(key).digest()

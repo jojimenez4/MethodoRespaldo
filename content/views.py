@@ -68,30 +68,9 @@ def create_server_interface():
 
     port_label = customtkinter.CTkLabel(frame, text="Puerto:")
     port_label.pack(pady=5)
-    port_entry = customtkinter.CTkEntry(frame)
+    port_entry = customtkinter.CTkEntry(frame, width=5)
+    port_entry.insert(0, "3306")
     port_entry.pack(pady=5)
-
-    username_label = customtkinter.CTkLabel(frame, text="Usuario:")
-    username_label.pack(pady=5)
-    username_entry = customtkinter.CTkEntry(frame)
-    username_entry.pack(pady=5)
-
-    def update_data(event=None):
-        server_type_selected = server_type.get()
-        username_entry.delete(0, customtkinter.END)
-        port_entry.delete(0, customtkinter.END)
-        if server_type_selected == "MySQL Server (TCP/IP)":
-            username_entry.insert(0, "root")
-            port_entry.insert(0, "3306")
-        elif server_type_selected == "SQL Server (Windows Authentication)":
-            username_entry.insert(0, "sa")
-            port_entry.insert(0, "1433")
-        else:
-            username_entry.insert(0, "")
-            port_entry.insert(0, "")
-
-    server_type.bind("<<ComboboxSelected>>", update_data)
-    update_data()
 
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:")
     password_label.pack(pady=5)
@@ -103,7 +82,7 @@ def create_server_interface():
         try:
             server_ip = server_ip_entry.get()
             port = int(port_entry.get())
-            username = username_entry.get()
+            username = f.user[0] if server_type.get() == "MySQL Server (TCP/IP)" else f.user[1]
             password = password_entry.get().encode("utf-8")
             key = f.KEY
             encrypted_password = f.encrypt(key, password)
