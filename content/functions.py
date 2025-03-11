@@ -45,6 +45,8 @@ def bd_server_verify_mysql(IP, port, username, password):
     except mysql.connector.Error as err:
         print(f"Error during MySQL server verification: {err}")
         return False
+    
+    
 
 def bd_server_verify_sql_server(server, username, password):
     try:
