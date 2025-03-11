@@ -31,7 +31,7 @@ def decrypt(key, source, decode=True):
         raise ValueError("Invalid padding...")
     return data[:-padding]
 
-def bd_login_verify_mysql(IP, port, username, password):
+def bd_server_verify_mysql(IP, port, username, password):
     try:
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         connection = mysql.connector.connect(
@@ -43,10 +43,10 @@ def bd_login_verify_mysql(IP, port, username, password):
         connection.close()
         return True
     except mysql.connector.Error as err:
-        print(f"Error during MySQL login verification: {err}")
+        print(f"Error during MySQL server verification: {err}")
         return False
 
-def bd_login_verify_sql_server(server, username, password):
+def bd_server_verify_sql_server(server, username, password):
     try:
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         connection_string = f"DRIVER={{SQL Server}};SERVER={server};UID={username};PWD={decrypted_password}"
@@ -54,7 +54,7 @@ def bd_login_verify_sql_server(server, username, password):
         connection.close()
         return True
     except pyodbc.Error as err:
-        print(f"Error during SQL Server login verification: {err}")
+        print(f"Error during SQL Server server verification: {err}")
         return False
 
 def backup_mysql_database(password, db_name, backup_dir):
