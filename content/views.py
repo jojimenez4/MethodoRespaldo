@@ -95,18 +95,27 @@ def create_server_interface():
             encrypted_password = f.encrypt(key, password)
             server_type_selected = server_type.get()
 
+            # Store server data
+            server_data = {
+                'server_type': server_type_selected,
+                'server_ip': server_ip,
+                'port': port,
+                'username': username,
+                'encrypted_password': encrypted_password
+            }
+
             if server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
                     server_window.destroy()
-                    open_selection_interface()  
+                    open_selection_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
                     server_window.destroy()
-                    open_selection_interface() 
+                    open_selection_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
@@ -124,7 +133,7 @@ def create_server_interface():
 
 # def open_selection_interface(parent_window):
 
-def open_selection_interface():
+def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
      # Cierra la ventana de inicio de sesión
 
@@ -166,8 +175,36 @@ def open_selection_interface():
     calendar_icon.pack(side="right", pady=10, padx=10)
 
     # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: print("Ejecutar clicked"))
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data))
     execute_button.pack(pady=10)
+
+    def execute_backup(folder_path_label, server_data):
+        folder_path = folder_path_label.replace("Destino: ", "")
+        if not folder_path:
+            messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
+            return
+
+        try:
+            if server_data is None:
+                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                return
+
+            server_type_selected = server_data['server_type']
+            server_ip = server_data['server_ip']
+            port = server_data['port']
+            username = server_data['username']
+            encrypted_password = server_data['encrypted_password']
+
+            if server_type_selected == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(encrypted_password, folder_path)
+                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                f.backup_sql_server_database(encrypted_password, folder_path)
+                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
+            else:
+                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
@@ -254,7 +291,7 @@ def open_backup_interface(parent_window):
     # Botón de Guardar y Cerrar
     save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
     save_button.pack(pady=20, padx=10)
-    
+
     # Segunda sección: Opciones de Respaldo
     backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w", width=40)
     backup_options_label.pack(pady=10, padx=10, anchor="w")
@@ -272,7 +309,7 @@ def open_backup_interface(parent_window):
     data_backup_var = customtkinter.StringVar()
     data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Datos", variable=data_backup_var)
     data_backup_checkbox.pack(pady=5, padx=30, anchor="w")
-   
+
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
@@ -282,19 +319,9 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
+
     root.mainloop()
 
 def close_and_return(current_window, parent_window):
     current_window.destroy()
     parent_window.deiconify()
-
-
-
-
-
-
-
-
-
-
-

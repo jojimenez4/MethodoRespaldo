@@ -58,24 +58,31 @@ def bd_server_verify_sql_server(server, username, password):
         print(f"Error during SQL Server server verification: {err}")
         return False
 
-def backup_mysql_database(password, db_name, backup_dir):
-    timestamp = datetime.datetime.now().strftime('%YYYY%mm%d%H%M')
-    backup_file = os.path.join(backup_dir, f"{db_name}_backup_{timestamp}.txt")
+def backup_mysql_database(password, backup_dir):
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
+    backup_file_name = f"prueba_backup_{timestamp}.txt"
+    decrypted_password = decrypt(KEY, password).decode("utf-8")
     
-    command = f"mysqldump -e -R -u root -p {password} {db_name} > {backup_file}"
+    command = f"cd\\mysql\\bin ;mysqldump -e -R -u root -p bdpos > \"{backup_file_name}\"; {decrypted_password}"
+    
     try:
         subprocess.run(command, shell=True, check=True)
-        print(f"Backup of MySQL database '{db_name}' completed successfully.")
+        
+        # Move the backup file to the destination directory
+        destination_path = os.path.join(backup_dir, backup_file_name)
+        os.rename(backup_file_name, destination_path)
+        
+        print(f"Backup of MySQL database completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up MySQL database: {e}")
 
-def backup_sql_server_database(server, user, password, db_name, backup_dir):
+def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    backup_file = os.path.join(backup_dir, f"{db_name}_backup_{timestamp}.bak")
+    backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
     
-    command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{db_name}] TO DISK='{backup_file}'\""
+    command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{dbname}] TO DISK='{backup_file}'\""
     try:
         subprocess.run(command, shell=True, check=True)
-        print(f"Backup of SQL Server database '{db_name}' completed successfully.")
+        print(f"Backup of SQL Server database '{dbname}' completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up SQL Server database: {e}")
