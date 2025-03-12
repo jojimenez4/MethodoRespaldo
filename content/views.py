@@ -1,10 +1,13 @@
 import customtkinter
+import tkinter as tk
 from tkinter import filedialog, messagebox
-from tkcalendar import Calendar, DateEntry
+from tkcalendar import DateEntry
 import content.functions as f
 
+customtkinter.set_appearance_mode("dark")
+
 def create_login_interface():
-    customtkinter.set_appearance_mode("dark")
+   
     login_window = customtkinter.CTk()
     login_window.title("Login")
     login_window.geometry("400x300")
@@ -32,7 +35,7 @@ def create_login_interface():
         if username == "admin" and password == "1234":  # Ejemplo de verificación
             messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
             login_window.destroy()
-            create_server_interface()
+            open_selection_interface()  # Saltar directamente a la interfaz de selección
         else:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
@@ -42,10 +45,10 @@ def create_login_interface():
 
     password_entry.bind("<Return>", lambda event: verify_login())
 
-    login_window.mainloop()
+ 
 
 def create_server_interface():
-    """Crea la interfaz de inicio de sesión."""
+#     """Crea la interfaz de inicio de sesión."""
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor MySQL")
     server_window.geometry("800x500")
@@ -113,26 +116,30 @@ def create_server_interface():
 
     server_window.mainloop()
 
-def open_selection_interface(server_window):
+# def open_selection_interface(parent_window):
+
+def open_selection_interface():
     """Abre la interfaz de selección de documentos."""
-    server_window.destroy()  # Cierra la ventana de inicio de sesión
+     # Cierra la ventana de inicio de sesión
 
     root = customtkinter.CTk()
     root.title("Respaldo local")
-    root.geometry("500x400")
+    root.geometry("600x400")
 
     frame = customtkinter.CTkFrame(root)
-    frame.pack(pady=20, padx=60, fill="both", expand=True)
+    frame.pack(pady=5, padx=5, fill="both", expand=True)
 
     label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16))
-    label.pack(pady=12, padx=10)
+    label.pack(pady=5, padx=5)
 
     def update_label():
         folder = filedialog.askdirectory()
         if folder:
-            result_label.configure(text="No se seleccionó carpeta")
-            rounded_label.configure(text="")
-            return None
+            rounded_label.configure(text=f"Destino: {folder}")
+            return folder
+        else:
+            messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
+            return ""
 
     folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label)
     folder_button.pack(pady=10)
@@ -149,7 +156,7 @@ def open_selection_interface(server_window):
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Icono de calendario para seleccionar fecha y hora
-    calendar_icon = customtkinter.CTkButton(date_frame, text="📅", width=30, command=lambda: open_calendar(root))
+    calendar_icon = customtkinter.CTkButton(date_frame, text="", width=30, command=lambda: open_calendar(root))
     calendar_icon.pack(side="right", pady=10, padx=10)
 
     # Botón para ejecutar
@@ -157,14 +164,14 @@ def open_selection_interface(server_window):
     execute_button.pack(pady=10)
 
     # Texto link para abrir la interfaz de configuración avanzada
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Advanced Settings", font=("Arial", 12), text_color="blue", cursor="hand2")
+    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2")
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
 
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
-        create_server_interface()  # Vuelve a abrir la ventana de inicio de sesión
+        # create_server_interface()  # Vuelve a abrir la ventana de inicio de sesión
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
@@ -183,9 +190,28 @@ def open_calendar(parent_window):
         calendar = DateEntry(calendar_window, width=12, background='darkblue', foreground='white', borderwidth=2)
         calendar.pack(pady=20)
 
+        # Cuadro de entrada para la hora de inicio
+        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:")
+        start_time_label.pack(pady=5)
+
+        start_time_frame = customtkinter.CTkFrame(calendar_window)
+        start_time_frame.pack(pady=5)
+
+        start_hour_spinbox = tk.Spinbox(start_time_frame, from_=0, to=23, width=2, format="%02.0f")
+        start_hour_spinbox.pack(side="left", padx=(20, 5))
+        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh")
+        start_hour_label.pack(side="left")
+
+        start_minute_spinbox = tk.Spinbox(start_time_frame, from_=0, to=59, width=2, format="%02.0f")
+        start_minute_spinbox.pack(side="left", padx=(20, 5))
+        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm")
+        start_minute_label.pack(side="left")
+
         def select_date():
             selected_date = calendar.get_date()
+            start_time = f"{start_hour_spinbox.get()}:{start_minute_spinbox.get()}"
             print(f"Fecha seleccionada: {selected_date}")
+            print(f"Hora de inicio: {start_time}")
             calendar_window.destroy()
 
         select_button = customtkinter.CTkButton(calendar_window, text="Seleccionar", command=select_date)
@@ -195,53 +221,52 @@ def open_calendar(parent_window):
 
 def open_backup_interface(parent_window):
     root = customtkinter.CTk()
-    root.title("Advanced Settings")
+    root.title("Configuración Avanzada")
     root.geometry("500x600")
 
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=20, padx=60, fill="both", expand=True)
 
     # Primera sección: Opciones de archivo SQL
-    sql_file_options_label = customtkinter.CTkLabel(frame, text="SQL file options", font=("Helvetica", 16), anchor="w")
+    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w")
     sql_file_options_label.pack(pady=10, padx=10, anchor="w")
 
-    # Checkbox para "Structure"
+    # Checkbox para "Estructura"
     structure_var = customtkinter.StringVar()
-    structure_checkbox = customtkinter.CTkCheckBox(frame, text="Structure", variable=structure_var)
+    structure_checkbox = customtkinter.CTkCheckBox(frame, text="Estructura", variable=structure_var)
     structure_checkbox.pack(pady=5, padx=10, anchor="w")
 
     # Sub-opciones de SQL (ejemplo)
     drop_table_var = customtkinter.StringVar()
-    drop_table_checkbox = customtkinter.CTkCheckBox(frame, text="Add DROP TABLE statement --add-drop-table", variable=drop_table_var)
+    drop_table_checkbox = customtkinter.CTkCheckBox(frame, text="Agregar declaración DROP TABLE --add-drop-table", variable=drop_table_var)
     drop_table_checkbox.pack(pady=5, padx=30, anchor="w")
 
     transaction_var = customtkinter.StringVar()
-    transaction_checkbox = customtkinter.CTkCheckBox(frame, text="Enclose export in a transaction --single-transaction", variable=transaction_var)
+    transaction_checkbox = customtkinter.CTkCheckBox(frame, text="Encerrar exportación en una transacción --single-transaction", variable=transaction_var)
     transaction_checkbox.pack(pady=5, padx=30, anchor="w")
 
-    # Añadir más opciones de SQL similares aquí...
     # Botón de Guardar y Cerrar
-    save_button = customtkinter.CTkButton(frame, text="Save & Close", command=lambda: close_and_return(root, parent_window))
+    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
     save_button.pack(pady=20, padx=10)
     
     # Segunda sección: Opciones de Respaldo
-    backup_options_label = customtkinter.CTkLabel(frame, text="Backup options", font=("Helvetica", 16), anchor="w")
+    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w")
     backup_options_label.pack(pady=10, padx=10, anchor="w")
 
-    # Checkbox para "Place the backup in subfolder"
+    # Checkbox para "Colocar el respaldo en subcarpeta"
     subfolder_var = customtkinter.StringVar()
-    subfolder_checkbox = customtkinter.CTkCheckBox(frame, text="Place the backup for each database into its own subfolder", variable=subfolder_var)
+    subfolder_checkbox = customtkinter.CTkCheckBox(frame, text="Colocar el respaldo para cada base de datos en su propia subcarpeta", variable=subfolder_var)
     subfolder_checkbox.pack(pady=5, padx=10, anchor="w")
 
     # Checkbox para estructura y datos
     structure_backup_var = customtkinter.StringVar()
-    structure_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Structure", variable=structure_backup_var)
+    structure_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Estructura", variable=structure_backup_var)
     structure_backup_checkbox.pack(pady=5, padx=30, anchor="w")
 
     data_backup_var = customtkinter.StringVar()
-    data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Data", variable=data_backup_var)
+    data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Datos", variable=data_backup_var)
     data_backup_checkbox.pack(pady=5, padx=30, anchor="w")
-
+   
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
@@ -251,7 +276,6 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
-
     root.mainloop()
 
 def close_and_return(current_window, parent_window):
