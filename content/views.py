@@ -1,8 +1,11 @@
 import customtkinter
 from tkinter import filedialog
-# import mysql.connector
 from tkinter import messagebox
 import content.functions as f
+
+
+# 12121212212121
+
 
 def create_login_interface():
     customtkinter.set_appearance_mode("dark")
@@ -12,8 +15,8 @@ def create_login_interface():
     login_window.title("Conectar al Servidor MySQL")
     login_window.geometry("800x500")
 
-#     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
-#     frame.pack(pady=20, padx=20, fill="both", expand=True)
+    frame = customtkinter.CTkFrame(server_window, corner_radius=10)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
 
     # Etiqueta y campo para el tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:")
