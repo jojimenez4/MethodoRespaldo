@@ -16,13 +16,13 @@ def create_login_interface():
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
     # Etiqueta y campo para el nombre de usuario
-    username_label = customtkinter.CTkLabel(frame, text="Usuario:")
+    username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
     username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
     username_entry.pack(pady=5)
 
     # Etiqueta y campo para la contraseña
-    password_label = customtkinter.CTkLabel(frame, text="Contraseña:")
+    password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
@@ -35,7 +35,7 @@ def create_login_interface():
         if username == "admin" and password == "1234":  # Ejemplo de verificación
             messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
             login_window.destroy()
-            open_selection_interface()  # Saltar directamente a la interfaz de selección
+            create_server_interface()  # Saltar a la interfaz de conexión al servidor
         else:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
@@ -45,7 +45,7 @@ def create_login_interface():
 
     password_entry.bind("<Return>", lambda event: verify_login())
 
- 
+    login_window.mainloop()
 
 def create_server_interface():
 #     """Crea la interfaz de inicio de sesión."""
@@ -57,25 +57,29 @@ def create_server_interface():
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
     # Etiqueta y campo para el tipo de servidor
-    server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:")
+    server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
     server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"])
+    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
     server_type.set("Seleccionar Base de Datos")
     server_type.pack(pady=5)
+    
+    # Frame para la dirección IP y el puerto
+    ip_port_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
+    ip_port_frame.pack(pady=5, padx=5, fill="x")
 
-    server_ip_label = customtkinter.CTkLabel(frame, text="Dirección IP del Servidor:")
-    server_ip_label.pack(pady=5)
-    server_ip_entry = customtkinter.CTkEntry(frame)
+    server_ip_label = customtkinter.CTkLabel(ip_port_frame, text="Dirección IP del Servidor:", width=30)
+    server_ip_label.pack(side="left", pady=5, padx=(110, 0))
+    server_ip_entry = customtkinter.CTkEntry(ip_port_frame)
     server_ip_entry.insert(0, "localhost")
-    server_ip_entry.pack(pady=5)
+    server_ip_entry.pack(side="left", pady=5, padx=(0, 10))
 
-    port_label = customtkinter.CTkLabel(frame, text="Puerto:")
-    port_label.pack(pady=5)
-    port_entry = customtkinter.CTkEntry(frame, width=5)
+    port_label = customtkinter.CTkLabel(ip_port_frame, text="Puerto:", width=10)
+    port_label.pack(side="left", pady=5, padx=(10, 0))
+    port_entry = customtkinter.CTkEntry(ip_port_frame)
     port_entry.insert(0, "3306")
-    port_entry.pack(pady=5)
+    port_entry.pack(side="left", pady=5, padx=(0, 10))
 
-    password_label = customtkinter.CTkLabel(frame, text="Contraseña:")
+    password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
@@ -85,7 +89,7 @@ def create_server_interface():
         try:
             server_ip = server_ip_entry.get()
             port = int(port_entry.get())
-            username = f.user[0] if server_type.get() == "MySQL Server (TCP/IP)" else f.user[1]
+            username = f.user
             password = password_entry.get().encode("utf-8")
             key = f.KEY
             encrypted_password = f.encrypt(key, password)
@@ -94,13 +98,15 @@ def create_server_interface():
             if server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
-                    open_selection_interface(server_window)
+                    server_window.destroy()
+                    open_selection_interface()  
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
-                if f.bd_server_verify_sql_server(server_ip, port, username, encrypted_password):
+                if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-                    open_selection_interface(server_window)
+                    server_window.destroy()
+                    open_selection_interface() 
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
@@ -129,7 +135,7 @@ def open_selection_interface():
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
-    label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16))
+    label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16), width=40)
     label.pack(pady=5, padx=5)
 
     def update_label():
@@ -144,7 +150,7 @@ def open_selection_interface():
     folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label)
     folder_button.pack(pady=10)
 
-    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12))
+    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=30)
     result_label.pack(pady=10)
 
     # Frame para la etiqueta redondeada y el icono de calendario
@@ -152,7 +158,7 @@ def open_selection_interface():
     date_frame.pack(pady=10, padx=10, fill="x")
 
     # Etiqueta redondeada para mostrar la dirección de la carpeta seleccionada
-    rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray")
+    rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=40)
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Icono de calendario para seleccionar fecha y hora
@@ -164,7 +170,7 @@ def open_selection_interface():
     execute_button.pack(pady=10)
 
     # Texto link para abrir la interfaz de configuración avanzada
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2")
+    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
 
@@ -191,7 +197,7 @@ def open_calendar(parent_window):
         calendar.pack(pady=20)
 
         # Cuadro de entrada para la hora de inicio
-        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:")
+        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:", width=20)
         start_time_label.pack(pady=5)
 
         start_time_frame = customtkinter.CTkFrame(calendar_window)
@@ -199,12 +205,12 @@ def open_calendar(parent_window):
 
         start_hour_spinbox = tk.Spinbox(start_time_frame, from_=0, to=23, width=2, format="%02.0f")
         start_hour_spinbox.pack(side="left", padx=(20, 5))
-        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh")
+        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh", width=5)
         start_hour_label.pack(side="left")
 
         start_minute_spinbox = tk.Spinbox(start_time_frame, from_=0, to=59, width=2, format="%02.0f")
         start_minute_spinbox.pack(side="left", padx=(20, 5))
-        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm")
+        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm", width=5)
         start_minute_label.pack(side="left")
 
         def select_date():
@@ -228,7 +234,7 @@ def open_backup_interface(parent_window):
     frame.pack(pady=20, padx=60, fill="both", expand=True)
 
     # Primera sección: Opciones de archivo SQL
-    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w")
+    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w", width=40)
     sql_file_options_label.pack(pady=10, padx=10, anchor="w")
 
     # Checkbox para "Estructura"
@@ -250,7 +256,7 @@ def open_backup_interface(parent_window):
     save_button.pack(pady=20, padx=10)
     
     # Segunda sección: Opciones de Respaldo
-    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w")
+    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w", width=40)
     backup_options_label.pack(pady=10, padx=10, anchor="w")
 
     # Checkbox para "Colocar el respaldo en subcarpeta"
