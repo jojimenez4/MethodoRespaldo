@@ -63,18 +63,29 @@ def backup_mysql_database(password, backup_dir):
     backup_file_name = f"prueba_backup_{timestamp}.txt"
     decrypted_password = decrypt(KEY, password).decode("utf-8")
     
-    command = f"cd\\mysql\\bin ;mysqldump -e -R -u root -p bdpos > \"{backup_file_name}\"; {decrypted_password}"
+    mysql_bin_path = "C:\\mysql\\bin"
+    mysqldump_path = os.path.join(mysql_bin_path, "mysqldump")
+    
+    command = f'"{mysqldump_path}" -e -R -u root -p"{decrypted_password}" bdpos > "{backup_file_name}"'
+    
+    # Construct the move command
+    move_command = f'move "{backup_file_name}" "{backup_dir}"'
     
     try:
+        # Change the current directory to the MySQL bin directory
+        os.chdir(mysql_bin_path)
+        
+        # Execute the mysqldump command
         subprocess.run(command, shell=True, check=True)
         
-        # Move the backup file to the destination directory
-        destination_path = os.path.join(backup_dir, backup_file_name)
-        os.rename(backup_file_name, destination_path)
+        # Move the backup file to the backup directory
+        subprocess.run(move_command, shell=True, check=True, cwd=mysql_bin_path)
         
         print(f"Backup of MySQL database completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up MySQL database: {e}")
+    except OSError as e:
+        print(f"Error changing directory: {e}")
 
 def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
