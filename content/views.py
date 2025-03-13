@@ -190,9 +190,6 @@ def open_selection_interface(server_data=None):
                 return
 
             server_type_selected = server_data['server_type']
-            server_ip = server_data['server_ip']
-            port = server_data['port']
-            username = server_data['username']
             encrypted_password = server_data['encrypted_password']
 
             if server_type_selected == "MySQL Server (TCP/IP)":

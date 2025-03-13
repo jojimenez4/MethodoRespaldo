@@ -61,31 +61,37 @@ def bd_server_verify_sql_server(server, username, password):
 def backup_mysql_database(password, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
     backup_file_name = f"prueba_backup_{timestamp}.txt"
+    rar_file_name = f"prueba_backup_{timestamp}.rar"
     decrypted_password = decrypt(KEY, password).decode("utf-8")
     
     mysql_bin_path = "C:\\mysql\\bin"
     mysqldump_path = os.path.join(mysql_bin_path, "mysqldump")
-    
+    rar_path = "C:\\WinRAR"
+
     command = f'"{mysqldump_path}" -e -R -u root -p"{decrypted_password}" bdpos > "{backup_file_name}"'
-    
-    # Construct the move command
-    move_command = f'move "{backup_file_name}" "{backup_dir}"'
-    
+    move_command = f'move {backup_file_name} {rar_path}'
+    comprimir_command = f'"rar" a -p- {rar_file_name} {backup_file_name}"'
+    delete_txt = f'del {backup_file_name}'
+    move_command2 = f'move {rar_file_name} {backup_dir}'
+
     try:
-        # Change the current directory to the MySQL bin directory
         os.chdir(mysql_bin_path)
-        
-        # Execute the mysqldump command
         subprocess.run(command, shell=True, check=True)
+        subprocess.run(move_command, shell=True, check=True)
+        os.chdir(rar_path)
         
-        # Move the backup file to the backup directory
-        subprocess.run(move_command, shell=True, check=True, cwd=mysql_bin_path)
-        
+        # Use Popen to send the password via stdin
+        rar_process = subprocess.Popen(comprimir_command, shell=True, stdin=subprocess.PIPE)
+        rar_process.communicate(input=decrypted_password)  # Encode the password to bytes
+        subprocess.run(delete_txt, shell=True, check=True)
+        subprocess.run(move_command2, shell=True, check=True)
         print(f"Backup of MySQL database completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up MySQL database: {e}")
     except OSError as e:
         print(f"Error changing directory: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
