@@ -4,90 +4,119 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 
-
 customtkinter.set_appearance_mode("dark")
-customtkinter.set_default_color_theme("green")
-
 
 def create_login_interface():
-    
-    login_window = customtkinter.CTk() 
-    login_window.title("Conectar al Servidor MySQL")
-    login_window.geometry("800x500")
-
+   
+    login_window = customtkinter.CTk()
+    login_window.title("Login")
+    login_window.geometry("400x300")
 
     frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
-    
 
-    server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:")
-    server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"])
-    server_type.set("Seleccionar Base de Datos")
-    server_type.pack(pady=5)
-
-    server_ip_label = customtkinter.CTkLabel(frame, text="Dirección IP del Servidor:")
-    server_ip_label.pack(pady=5)
-    server_ip_entry = customtkinter.CTkEntry(frame)
-    server_ip_entry.insert(0, "localhost")
-    server_ip_entry.pack(pady=5)
-
-    port_label = customtkinter.CTkLabel(frame, text="Puerto:")
-    port_label.pack(pady=5)
-    port_entry = customtkinter.CTkEntry(frame)
-    port_entry.pack(pady=5)
-
-    username_label = customtkinter.CTkLabel(frame, text="Usuario:")
+    # Etiqueta y campo para el nombre de usuario
+    username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
     username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
     username_entry.insert(0, "root")  # Usuario por defecto
     username_entry.pack(pady=5)
 
-    def update_data(event=None):
-        server_type_selected = server_type.get()
-        username_entry.delete(0, customtkinter.END)
-        port_entry.delete(0, customtkinter.END)
-        if server_type_selected == "MySQL Server (TCP/IP)":
-            username_entry.insert(0, "root")
-            port_entry.insert(0, "3306")
-        elif server_type_selected == "SQL Server (Windows Authentication)":
-            username_entry.insert(0, "sa")
-            port_entry.insert(0, "1433")
-        else:
-            username_entry.insert(0, "")
-            port_entry.insert(0, "")
-
-    server_type.bind("<<ComboboxSelected>>", update_data)
-    update_data()
-
-    password_label = customtkinter.CTkLabel(frame, text="Contraseña:")
+    # Etiqueta y campo para la contraseña
+    password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
+    # Función para verificar el inicio de sesión
     def verify_login():
+        username = username_entry.get()
+        password = password_entry.get()
+        # Aquí puedes agregar la lógica para verificar el usuario y la contraseña
+        if username == "admin" and password == "1234":  # Ejemplo de verificación
+            messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
+            login_window.destroy()
+            create_server_interface()  # Saltar a la interfaz de conexión al servidor
+        else:
+            messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
+
+    # Botón de inicio de sesión
+    login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login)
+    login_button.pack(pady=20)
+
+    password_entry.bind("<Return>", lambda event: verify_login())
+
+    login_window.mainloop()
+
+def create_server_interface():
+#     """Crea la interfaz de inicio de sesión."""
+    server_window = customtkinter.CTk() 
+    server_window.title("Conectar al Servidor MySQL")
+    server_window.geometry("800x500")
+
+    frame = customtkinter.CTkFrame(server_window, corner_radius=10)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+    # Etiqueta y campo para el tipo de servidor
+    server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
+    server_type_label.pack(pady=5)
+    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
+    server_type.set("Seleccionar Base de Datos")
+    server_type.pack(pady=5)
+    
+    # Frame para la dirección IP y el puerto
+    ip_port_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
+    ip_port_frame.pack(pady=5, padx=5, fill="x")
+
+    server_ip_label = customtkinter.CTkLabel(ip_port_frame, text="Dirección IP del Servidor:", width=30)
+    server_ip_label.pack(side="left", pady=5, padx=(110, 0))
+    server_ip_entry = customtkinter.CTkEntry(ip_port_frame)
+    server_ip_entry.insert(0, "localhost")
+    server_ip_entry.pack(side="left", pady=5, padx=(0, 10))
+
+    port_label = customtkinter.CTkLabel(ip_port_frame, text="Puerto:", width=10)
+    port_label.pack(side="left", pady=5, padx=(10, 0))
+    port_entry = customtkinter.CTkEntry(ip_port_frame)
+    port_entry.insert(0, "3306")
+    port_entry.pack(side="left", pady=5, padx=(0, 10))
+
+    password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
+    password_label.pack(pady=5)
+    password_entry = customtkinter.CTkEntry(frame, show="*")
+    password_entry.pack(pady=5)
+
+    # Función para verificar el inicio de sesión
+    def verify_server():
         try:
             server_ip = server_ip_entry.get()
             port = int(port_entry.get())
-            username = username_entry.get()
+            username = f.user
             password = password_entry.get().encode("utf-8")
             key = f.KEY
             encrypted_password = f.encrypt(key, password)
             server_type_selected = server_type.get()
 
-            # Llama a la función correspondiente según el tipo de servidor seleccionado
+            # Store server data
+            server_data = {
+                'server_type': server_type_selected,
+                'server_ip': server_ip,
+                'port': port,
+                'username': username,
+                'encrypted_password': encrypted_password
+            }
+
             if server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
-                    login_window.destroy()
-                    open_selection_interface()  
+                    server_window.destroy()
+                    open_selection_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-                    login_window.destroy()
-                    open_selection_interface() 
+                    server_window.destroy()
+                    open_selection_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
@@ -95,15 +124,19 @@ def create_login_interface():
         except Exception as e:
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
 
-    login_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_login)
-    login_button.pack(pady=20)
-    password_entry.bind("<Return>", lambda event: verify_login())
+    # Asigna la función verify_server al botón de inicio de sesión
+    server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server)
+    server_button.pack(pady=20)
 
-    login_window.mainloop()
+    password_entry.bind("<Return>", lambda event: verify_server())
 
-def open_selection_interface():
+    server_window.mainloop()
+
+# def open_selection_interface(parent_window):
+
+def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
-
+     # Cierra la ventana de inicio de sesión
 
     root = customtkinter.CTk()
     root.title("Respaldo local")
@@ -143,8 +176,33 @@ def open_selection_interface():
     calendar_icon.pack(side="right", pady=10, padx=10)
 
     # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: print("Ejecutar clicked"))
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data))
     execute_button.pack(pady=10)
+
+    def execute_backup(folder_path_label, server_data):
+        folder_path = folder_path_label.replace("Destino: ", "")
+        if not folder_path:
+            messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
+            return
+
+        try:
+            if server_data is None:
+                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                return
+
+            server_type_selected = server_data['server_type']
+            encrypted_password = server_data['encrypted_password']
+
+            if server_type_selected == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(encrypted_password, folder_path)
+                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                f.backup_sql_server_database(encrypted_password, folder_path)
+                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
+            else:
+                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
@@ -156,7 +214,6 @@ def open_selection_interface():
         create_login_interface()  # Vuelve a abrir la ventana de inicio de sesión
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
-
 
     root.mainloop()
 
@@ -231,7 +288,7 @@ def open_backup_interface(parent_window):
     # Botón de Guardar y Cerrar
     save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
     save_button.pack(pady=20, padx=10)
-    
+
     # Segunda sección: Opciones de Respaldo
     backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w", width=40)
     backup_options_label.pack(pady=10, padx=10, anchor="w")
@@ -249,7 +306,7 @@ def open_backup_interface(parent_window):
     data_backup_var = customtkinter.StringVar()
     data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Datos", variable=data_backup_var)
     data_backup_checkbox.pack(pady=5, padx=30, anchor="w")
-   
+
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
@@ -259,19 +316,9 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
+
     root.mainloop()
 
 def close_and_return(current_window, parent_window):
     current_window.destroy()
     parent_window.deiconify()
-
-
-
-
-
-
-
-
-
-
-
