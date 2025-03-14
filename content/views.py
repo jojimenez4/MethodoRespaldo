@@ -1,61 +1,68 @@
 import customtkinter
-from tkinter import filedialog
-from tkinter import messagebox
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from tkcalendar import DateEntry
 import content.functions as f
-
-
-# 12121212212121
-
 
 def create_login_interface():
     customtkinter.set_appearance_mode("dark")
     
-    """Crea la interfaz de inicio de sesión."""
     login_window = customtkinter.CTk() 
     login_window.title("Conectar al Servidor MySQL")
     login_window.geometry("800x500")
 
-    frame = customtkinter.CTkFrame(server_window, corner_radius=10)
+
+    frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-    # Etiqueta y campo para el tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:")
     server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"])
-    server_type.set("MySQL Server (TCP/IP)")  # Valor por defecto
+    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"])
+    server_type.set("Seleccionar Base de Datos")
     server_type.pack(pady=5)
 
-    # Etiqueta y campo para el nombre del servidor
-    server_name_label = customtkinter.CTkLabel(frame, text="Nombre del Servidor:")
-    server_name_label.pack(pady=5)
-    server_name_entry = customtkinter.CTkEntry(frame)
-    server_name_entry.insert(0, "localhost")  # Valor por defecto
-    server_name_entry.pack(pady=5)
+    server_ip_label = customtkinter.CTkLabel(frame, text="Dirección IP del Servidor:")
+    server_ip_label.pack(pady=5)
+    server_ip_entry = customtkinter.CTkEntry(frame)
+    server_ip_entry.insert(0, "localhost")
+    server_ip_entry.pack(pady=5)
 
-    # Etiqueta y campo para el puerto
     port_label = customtkinter.CTkLabel(frame, text="Puerto:")
     port_label.pack(pady=5)
     port_entry = customtkinter.CTkEntry(frame)
-    port_entry.insert(0, "3306")  # Puerto por defecto de MySQL
     port_entry.pack(pady=5)
 
-    # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:")
     username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
     username_entry.insert(0, "root")  # Usuario por defecto
     username_entry.pack(pady=5)
 
-    # Etiqueta y campo para la contraseña
+    def update_data(event=None):
+        server_type_selected = server_type.get()
+        username_entry.delete(0, customtkinter.END)
+        port_entry.delete(0, customtkinter.END)
+        if server_type_selected == "MySQL Server (TCP/IP)":
+            username_entry.insert(0, "root")
+            port_entry.insert(0, "3306")
+        elif server_type_selected == "SQL Server (Windows Authentication)":
+            username_entry.insert(0, "sa")
+            port_entry.insert(0, "1433")
+        else:
+            username_entry.insert(0, "")
+            port_entry.insert(0, "")
+
+    server_type.bind("<<ComboboxSelected>>", update_data)
+    update_data()
+
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:")
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
-    # Función para verificar el inicio de sesión
     def verify_login():
         try:
-            server_ip = server_name_entry.get()
+            server_ip = server_ip_entry.get()
             port = int(port_entry.get())
             username = username_entry.get()
             password = password_entry.get().encode("utf-8")
@@ -65,15 +72,17 @@ def create_login_interface():
 
             # Llama a la función correspondiente según el tipo de servidor seleccionado
             if server_type_selected == "MySQL Server (TCP/IP)":
-                if f.bd_login_verify_mysql(server_ip, port, username, encrypted_password):
+                if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
-                    open_selection_interface(login_window)
+                    login_window.destroy()
+                    open_selection_interface()  
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
-                if f.bd_login_verify_sql_server(server_ip, port, username, encrypted_password):
+                if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-                    open_selection_interface(login_window)
+                    login_window.destroy()
+                    open_selection_interface() 
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
@@ -81,17 +90,15 @@ def create_login_interface():
         except Exception as e:
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
 
-    # Asigna la función verify_login al botón de inicio de sesión
     login_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_login)
     login_button.pack(pady=20)
+    password_entry.bind("<Return>", lambda event: verify_login())
 
-    # password_entry.bind("<Return>", lambda event: verify_server())
+    login_window.mainloop()
 
-    # server_window.mainloop()
-
-def open_selection_interface(login_window):
+def open_selection_interface():
     """Abre la interfaz de selección de documentos."""
-    login_window.destroy()  # Cierra la ventana de inicio de sesión
+
 
     root = customtkinter.CTk()
     root.title("Respaldo local")
@@ -100,7 +107,7 @@ def open_selection_interface(login_window):
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
-    label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16))
+    label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16), width=40)
     label.pack(pady=5, padx=5)
 
     def update_label():
@@ -108,13 +115,14 @@ def open_selection_interface(login_window):
         if folder:
             rounded_label.configure(text=f"Destino: {folder}")
             return folder
-
-      
+        else:
+            messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
+            return ""
 
     folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label)
     folder_button.pack(pady=10)
 
-    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12))
+    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=30)
     result_label.pack(pady=10)
 
     # Frame para la etiqueta redondeada y el icono de calendario
@@ -122,7 +130,7 @@ def open_selection_interface(login_window):
     date_frame.pack(pady=10, padx=10, fill="x")
 
     # Etiqueta redondeada para mostrar la dirección de la carpeta seleccionada
-    rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray")
+    rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=40)
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Icono de calendario para seleccionar fecha y hora
@@ -134,7 +142,7 @@ def open_selection_interface(login_window):
     execute_button.pack(pady=10)
 
     # Texto link para abrir la interfaz de configuración avanzada
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2")
+    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
 
@@ -144,8 +152,7 @@ def open_selection_interface(login_window):
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
-    # Evitar que se abran múltiples ventanas
-    root.grab_set()
+
     root.mainloop()
 
 calendar_window = None
@@ -162,7 +169,7 @@ def open_calendar(parent_window):
         calendar.pack(pady=20)
 
         # Cuadro de entrada para la hora de inicio
-        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:")
+        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:", width=20)
         start_time_label.pack(pady=5)
 
         start_time_frame = customtkinter.CTkFrame(calendar_window)
@@ -170,15 +177,13 @@ def open_calendar(parent_window):
 
         start_hour_spinbox = tk.Spinbox(start_time_frame, from_=0, to=23, width=2, format="%02.0f")
         start_hour_spinbox.pack(side="left", padx=(20, 5))
-        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh")
+        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh", width=5)
         start_hour_label.pack(side="left")
 
         start_minute_spinbox = tk.Spinbox(start_time_frame, from_=0, to=59, width=2, format="%02.0f")
         start_minute_spinbox.pack(side="left", padx=(20, 5))
-        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm")
+        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm", width=5)
         start_minute_label.pack(side="left")
-
-       
 
         def select_date():
             selected_date = calendar.get_date()
@@ -201,7 +206,7 @@ def open_backup_interface(parent_window):
     frame.pack(pady=20, padx=60, fill="both", expand=True)
 
     # Primera sección: Opciones de archivo SQL
-    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w")
+    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w", width=40)
     sql_file_options_label.pack(pady=10, padx=10, anchor="w")
 
     # Checkbox para "Estructura"
@@ -218,13 +223,12 @@ def open_backup_interface(parent_window):
     transaction_checkbox = customtkinter.CTkCheckBox(frame, text="Encerrar exportación en una transacción --single-transaction", variable=transaction_var)
     transaction_checkbox.pack(pady=5, padx=30, anchor="w")
 
-
     # Botón de Guardar y Cerrar
     save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
     save_button.pack(pady=20, padx=10)
     
     # Segunda sección: Opciones de Respaldo
-    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w")
+    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w", width=40)
     backup_options_label.pack(pady=10, padx=10, anchor="w")
 
     # Checkbox para "Colocar el respaldo en subcarpeta"
@@ -241,7 +245,6 @@ def open_backup_interface(parent_window):
     data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Datos", variable=data_backup_var)
     data_backup_checkbox.pack(pady=5, padx=30, anchor="w")
    
-
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
@@ -251,9 +254,6 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
-
-    
-
     root.mainloop()
 
 def close_and_return(current_window, parent_window):
