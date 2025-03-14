@@ -80,9 +80,12 @@ def backup_mysql_database(password, backup_dir):
         subprocess.run(move_command, shell=True, check=True)
         os.chdir(rar_path)
         
-        # Use Popen to send the password via stdin
-        rar_process = subprocess.Popen(comprimir_command, shell=True, stdin=subprocess.PIPE)
-        rar_process.communicate(input=decrypted_password)  # Encode the password to bytes
+        rar_process = subprocess.run(comprimir_command, shell=True, input=password, capture_output=True, text=True)
+        if rar_process.returncode != 0:
+            print(f"RAR Output: {rar_process.stdout}")
+            print(f"RAR Error: {rar_process.stderr}")
+            raise subprocess.CalledProcessError(rar_process.returncode, comprimir_command)
+
         subprocess.run(delete_txt, shell=True, check=True)
         subprocess.run(move_command2, shell=True, check=True)
         print(f"Backup of MySQL database completed successfully.")
