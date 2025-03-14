@@ -4,8 +4,12 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 
+
+customtkinter.set_appearance_mode("dark")
+customtkinter.set_default_color_theme("green")
+
+
 def create_login_interface():
-    customtkinter.set_appearance_mode("dark")
     
     login_window = customtkinter.CTk() 
     login_window.title("Conectar al Servidor MySQL")
@@ -14,6 +18,7 @@ def create_login_interface():
 
     frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
+    
 
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:")
     server_type_label.pack(pady=5)
