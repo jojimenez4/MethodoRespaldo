@@ -4,6 +4,8 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 
+
+
 customtkinter.set_appearance_mode("dark")
 
 def create_login_interface():
@@ -57,10 +59,16 @@ def create_server_interface():
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
+
+    # Etiqueta y campo para el archivo de base de datos
+
+    db_file_entry = customtkinter.CTkEntry(frame)
+    
+
     # Etiqueta y campo para el tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
     server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos","MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
+    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos", "MySQL", "MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
     server_type.set("Seleccionar Base de Datos")
     server_type.pack(pady=5)
     
@@ -85,6 +93,8 @@ def create_server_interface():
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
+    
+
     # Función para verificar el inicio de sesión
     def verify_server():
         try:
@@ -105,13 +115,24 @@ def create_server_interface():
                 'encrypted_password': encrypted_password
             }
 
-            if server_type_selected == "MySQL Server (TCP/IP)":
+            #seleciona el archivo database.db de la carpeta MethodoRespaldo 
+
+            if server_type_selected == "MySQL":
+                db_file = "c:\\MethodoRespaldo\\database.db"  # Path to the SQLite database file
+                server_data['db_file'] = db_file
+                messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
+                server_window.destroy()
+
+                open_selection_interface(server_data)
+                
+
+            elif server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
-                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
+                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
                     server_window.destroy()
                     open_selection_interface(server_data)
                 else:
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
+                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL Server.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
@@ -131,9 +152,7 @@ def create_server_interface():
     password_entry.bind("<Return>", lambda event: verify_server())
 
     server_window.mainloop()
-
-# def open_selection_interface(parent_window):
-
+    
 def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
      # Cierra la ventana de inicio de sesión
@@ -189,6 +208,21 @@ def open_selection_interface(server_data=None):
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
+            
+            db_file = server_data['db_file']
+            f.backup_sqlite_database(db_file, folder_path)
+            messagebox.showinfo("Éxito", "Respaldo de SQLite completado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+
+
+
+
+                       
+            db_file = server_data['db_file'] # Path to the SQLite database file
+
+
+
 
             server_type_selected = server_data['server_type']
             encrypted_password = server_data['encrypted_password']
@@ -220,6 +254,18 @@ def open_selection_interface(server_data=None):
 calendar_window = None
 
 def open_calendar(parent_window):
+
+    # start_time_label = None
+    # start_time_frame = None
+    # start_hour_spinbox = None
+    # start_hour_label = None
+    # start_minute_spinbox = None
+    # start_minute_label = None
+    # select_button = None
+
+
+
+
     global calendar_window
     if calendar_window is None or not calendar_window.winfo_exists():
         calendar_window = customtkinter.CTkToplevel(parent_window)
@@ -251,7 +297,7 @@ def open_calendar(parent_window):
             selected_date = calendar.get_date()
             start_time = f"{start_hour_spinbox.get()}:{start_minute_spinbox.get()}"
             print(f"Fecha seleccionada: {selected_date}")
-            print(f"Hora de inicio: {start_time}")
+            print(f"Hora: {start_time}")
             calendar_window.destroy()
 
         select_button = customtkinter.CTkButton(calendar_window, text="Seleccionar", command=select_date)
@@ -316,6 +362,8 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
+
+    
 
     root.mainloop()
 

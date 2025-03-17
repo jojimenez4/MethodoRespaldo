@@ -9,7 +9,7 @@ import mysql.connector
 import pyodbc
 
 KEY = b"METHODO_PROVIDENCIA2025"  # encryption key
-user = "root"
+user = ""
 
 def encrypt(key, source, encode=True):
     key = SHA256.new(key).digest()
@@ -106,3 +106,39 @@ def backup_sql_server_database(server, user, password, dbname, backup_dir):
         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up SQL Server database: {e}")
+
+
+
+#prueba encriptar y  comprimir archivo sqlite.db
+#:)
+
+
+
+def backup_sqlite_database(db_file, backup_dir):
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    backup_file = os.path.join(backup_dir, f"sqlite_backup_{timestamp}.txt")
+    rar_file_name = os.path.join(backup_dir, f"sqlite_backup_{timestamp}.rar")
+
+    try:
+        # Copiar el archivo de la base de datos
+        import shutil
+        shutil.copy(db_file, backup_file)
+
+        # Comprimir el archivo de respaldo
+        rar_command = f'"C:\\WinRAR\\WinRAR.exe" a -r {rar_file_name} {backup_file}'
+        rar_process = subprocess.run(rar_command, shell=True, capture_output=True, text=True)
+        if rar_process.returncode != 0:
+            print(f"RAR Output: {rar_process.stdout}")
+            print(f"RAR Error: {rar_process.stderr}")
+            raise subprocess.CalledProcessError(rar_process.returncode, rar_command)
+
+        # Eliminar el archivo de respaldo sin comprimir
+        os.remove(backup_file)
+
+        print(f"Backup of SQLite database completed successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while backing up SQLite database: {e}")
+    except OSError as e:
+        print(f"Error occurred while copying or deleting the database file: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
