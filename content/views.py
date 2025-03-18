@@ -4,6 +4,7 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 from tkinter import simpledialog
+    
 
 customtkinter.set_appearance_mode("dark")
 
@@ -11,9 +12,28 @@ def create_login_interface():
     login_window = customtkinter.CTk()
     login_window.title("Login")
     login_window.geometry("400x300")
-
+    
     frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+
+    
+
+    # Función para alternar el modo de apariencia
+    # def toggle_apparanace_mode():
+    #     current_mode = customtkinter.get_appearance_mode()
+    #     new_mode = "light" if current_mode == "dark" else "dark"
+    #     customtkinter.set_appearance_mode(new_mode)
+    #     # Actualiza el texto del interruptor
+    #     apparance_switch.configure(text="Modo claro" if new_mode == "light" else "Modo claro")
+
+    # # Switch para cambiar el modo de apariencia
+    # apparance_switch = customtkinter.CTkSwitch(
+    #     login_window, 
+    #     text="Modo oscuro" if customtkinter.get_appearance_mode() == "dark" else "Modo oscuro", 
+    #     command=toggle_apparanace_mode
+    # )
+    # apparance_switch.pack(pady=10, padx=10, anchor="ne")
 
     # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
@@ -41,7 +61,7 @@ def create_login_interface():
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
     # Botón de inicio de sesión
-    login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login)
+    login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login, fg_color="green")
     login_button.pack(pady=20)
 
     password_entry.bind("<Return>", lambda event: verify_login())
@@ -51,7 +71,7 @@ def create_login_interface():
 def create_server_interface():
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor MySQL")
-    server_window.geometry("800x500")
+    server_window.geometry("800x350")
 
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
@@ -105,11 +125,11 @@ def create_server_interface():
             }
 
             if server_type_selected == "MySQL":
-                db_file = "c:\\MethodoRespaldo\\database.db"  # Path para SQLite database file
-                server_data['db_file'] = db_file
-                messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
-                server_window.destroy()
-                open_selection_interface(server_data)
+                 db_file = "c:\\MethodoRespaldo\\database.db"  # Path para SQLite database file
+                 server_data['db_file'] = db_file
+                 messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
+                 server_window.destroy()
+                 open_selection_interface(server_data)
             elif server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
@@ -130,7 +150,7 @@ def create_server_interface():
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
 
     # Asigna la función verify_server al botón de inicio de sesión
-    server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server)
+    server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server, fg_color="green")
     server_button.pack(pady=20)
 
     password_entry.bind("<Return>", lambda event: verify_server())
@@ -147,10 +167,10 @@ def open_selection_interface(server_data=None):
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
     # Botón para mostrar el historial de respaldos en la esquina superior derecha
-    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command= lambda: show_backup_history())
+    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command= lambda: show_backup_history(), fg_color="green")
     history_button.pack(pady=10, padx=10, anchor="ne")
 
-    label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16), width=40)
+    label = customtkinter.CTkLabel(frame, text="Selecciona carpeta destino", font=("Helvetica", 16), width=40)
     label.pack(pady=5, padx=5)
 
     def update_label():
@@ -162,7 +182,7 @@ def open_selection_interface(server_data=None):
             messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
             return ""
 
-    folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label)
+    folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label, fg_color="green")
     folder_button.pack(pady=10)
 
     result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=30)
@@ -177,11 +197,11 @@ def open_selection_interface(server_data=None):
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Icono de calendario para seleccionar fecha y hora
-    calendar_icon = customtkinter.CTkButton(date_frame, text="📅", width=30, command=lambda: open_calendar(root))
+    calendar_icon = customtkinter.CTkButton(date_frame, text="📅", width=30, command=lambda: open_calendar(root), fg_color="green")
     calendar_icon.pack(side="right", pady=10, padx=10)
 
     # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data))
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
 
     def password_compress(folder_path_label, server_data):
@@ -215,12 +235,14 @@ def open_selection_interface(server_data=None):
                 return
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            
+
+    
+
     # Función para mostrar el historial de respaldos
     def show_backup_history():
         try:
             # Aquí puedes agregar la lógica para obtener el historial de respaldos
-            backup_history = f.get_backup_history()  # Ejemplo de función para obtener el historial
+            backup_history = ["Backup 1 - 2023-01-01", "Backup 2 - 2023-02-01", "Backup 3 - 2023-03-01"] # Simulación de historial de respaldos
             if not backup_history:
                 raise ValueError("No hay historial de respaldos disponible.")
             messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
@@ -230,9 +252,21 @@ def open_selection_interface(server_data=None):
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
     # Texto link para abrir la interfaz de configuración avanzada
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
+    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="white", cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
+
+    # Función para cambiar el color al hacer hover
+    def on_enter(event):
+        advanced_settings_link.configure(text_color="green")
+
+    def on_leave(event):
+        advanced_settings_link.configure(text_color="white")
+
+# Bind the hover events
+    advanced_settings_link.bind("<Enter>", on_enter)
+    advanced_settings_link.bind("<Leave>", on_leave)
+
 
     def on_closing():
         root.destroy()  # Cierra la ventana actual
@@ -248,7 +282,7 @@ def open_calendar(parent_window):
     global calendar_window
     if calendar_window is None or not calendar_window.winfo_exists():
         calendar_window = customtkinter.CTkToplevel(parent_window)
-        calendar_window.title("Seleccionar Fecha y Hora")
+        calendar_window.title("Respaldo automatico") 
         calendar_window.geometry("300x300")
         calendar_window.transient(parent_window)  # Show on top
 
@@ -279,7 +313,7 @@ def open_calendar(parent_window):
             print(f"Hora: {start_time}")
             calendar_window.destroy()
 
-        select_button = customtkinter.CTkButton(calendar_window, text="Seleccionar", command=select_date)
+        select_button = customtkinter.CTkButton(calendar_window, text="Aplicar", command=select_date, fg_color="green")
         select_button.pack(pady=20)
 
         calendar_window.protocol("WM_DELETE_WINDOW", lambda: calendar_window.destroy())
@@ -311,7 +345,7 @@ def open_backup_interface(parent_window):
     transaction_checkbox.pack(pady=5, padx=30, anchor="w")
 
     # Botón de Guardar y Cerrar
-    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
+    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window), fg_color="green")
     save_button.pack(pady=20, padx=10)
 
     # Segunda sección: Opciones de Respaldo
