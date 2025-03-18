@@ -3,13 +3,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
-
-
+from tkinter import simpledialog
 
 customtkinter.set_appearance_mode("dark")
 
 def create_login_interface():
-   
     login_window = customtkinter.CTk()
     login_window.title("Login")
     login_window.geometry("400x300")
@@ -51,19 +49,12 @@ def create_login_interface():
     login_window.mainloop()
 
 def create_server_interface():
-#     """Crea la interfaz de inicio de sesión."""
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor MySQL")
     server_window.geometry("800x500")
 
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
-
-
-    # Etiqueta y campo para el archivo de base de datos
-
-    db_file_entry = customtkinter.CTkEntry(frame)
-    
 
     # Etiqueta y campo para el tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
@@ -93,8 +84,6 @@ def create_server_interface():
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
-    
-
     # Función para verificar el inicio de sesión
     def verify_server():
         try:
@@ -115,17 +104,12 @@ def create_server_interface():
                 'encrypted_password': encrypted_password
             }
 
-            #seleciona el archivo database.db de la carpeta MethodoRespaldo 
-
             if server_type_selected == "MySQL":
-                db_file = "c:\\MethodoRespaldo\\database.db"  # Path to the SQLite database file
+                db_file = "c:\\MethodoRespaldo\\database.db"  # Path para SQLite database file
                 server_data['db_file'] = db_file
                 messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
                 server_window.destroy()
-
                 open_selection_interface(server_data)
-                
-
             elif server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
@@ -155,14 +139,16 @@ def create_server_interface():
     
 def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
-     # Cierra la ventana de inicio de sesión
-
     root = customtkinter.CTk()
     root.title("Respaldo local")
     root.geometry("600x400")
 
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
+
+    # Botón para mostrar el historial de respaldos en la esquina superior derecha
+    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command= lambda: show_backup_history())
+    history_button.pack(pady=10, padx=10, anchor="ne")
 
     label = customtkinter.CTkLabel(frame, text="Seleccionar carpeta destino", font=("Helvetica", 16), width=40)
     label.pack(pady=5, padx=5)
@@ -191,14 +177,14 @@ def open_selection_interface(server_data=None):
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Icono de calendario para seleccionar fecha y hora
-    calendar_icon = customtkinter.CTkButton(date_frame, text="", width=30, command=lambda: open_calendar(root))
+    calendar_icon = customtkinter.CTkButton(date_frame, text="📅", width=30, command=lambda: open_calendar(root))
     calendar_icon.pack(side="right", pady=10, padx=10)
 
     # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data))
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data))
     execute_button.pack(pady=10)
 
-    def execute_backup(folder_path_label, server_data):
+    def password_compress(folder_path_label, server_data):
         folder_path = folder_path_label.replace("Destino: ", "")
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
@@ -209,34 +195,39 @@ def open_selection_interface(server_data=None):
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
             
-            db_file = server_data['db_file']
-            f.backup_sqlite_database(db_file, folder_path)
-            messagebox.showinfo("Éxito", "Respaldo de SQLite completado.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-
-
-
-
-                       
-            db_file = server_data['db_file'] # Path to the SQLite database file
-
-
-
-
             server_type_selected = server_data['server_type']
             encrypted_password = server_data['encrypted_password']
+            
+            # Solicitar contraseña para el archivo comprimido
+            rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
+            if not rar_password:
+                messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
+                return
 
             if server_type_selected == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(encrypted_password, folder_path)
-                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+                f.backup_mysql_database(encrypted_password, folder_path, rar_password)
+                messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
-                f.backup_sql_server_database(encrypted_password, folder_path)
-                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
+                f.backup_sql_server_database(encrypted_password, folder_path, rar_password)
+                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado y comprimido con contraseña.")
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                return
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            
+    # Función para mostrar el historial de respaldos
+    def show_backup_history():
+        try:
+            # Aquí puedes agregar la lógica para obtener el historial de respaldos
+            backup_history = f.get_backup_history()  # Ejemplo de función para obtener el historial
+            if not backup_history:
+                raise ValueError("No hay historial de respaldos disponible.")
+            messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
+        except ValueError as ve:
+            messagebox.showinfo("Historial de Respaldos", str(ve))
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
@@ -254,18 +245,6 @@ def open_selection_interface(server_data=None):
 calendar_window = None
 
 def open_calendar(parent_window):
-
-    # start_time_label = None
-    # start_time_frame = None
-    # start_hour_spinbox = None
-    # start_hour_label = None
-    # start_minute_spinbox = None
-    # start_minute_label = None
-    # select_button = None
-
-
-
-
     global calendar_window
     if calendar_window is None or not calendar_window.winfo_exists():
         calendar_window = customtkinter.CTkToplevel(parent_window)
@@ -362,8 +341,6 @@ def open_backup_interface(parent_window):
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
-
-    
 
     root.mainloop()
 
