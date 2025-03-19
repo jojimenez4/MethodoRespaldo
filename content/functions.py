@@ -75,16 +75,12 @@ def backup_mysql_database(password, backup_dir):
     move_command2 = f'move {rar_file_name} {backup_dir}'
 
     try:
-        os.chdir(mysql_bin_path)
-        subprocess.run(command, shell=True, check=True)
+        os.chdir(mysql_bin_path,rar_path)
         subprocess.run(move_command, shell=True, check=True)
-        os.chdir(rar_path)
         
-        rar_process = subprocess.run(comprimir_command, shell=True, input=password, capture_output=True, text=True)
-        if rar_process.returncode != 0:
-            print(f"RAR Output: {rar_process.stdout}")
-            print(f"RAR Error: {rar_process.stderr}")
-            raise subprocess.CalledProcessError(rar_process.returncode, comprimir_command)
+        # Use Popen to send the password via stdin
+        rar_process = subprocess.Popen(comprimir_command, shell=True, stdin=subprocess.PIPE)
+        rar_process.communicate(input=decrypted_password)  # Encode the password to bytes
 
         subprocess.run(delete_txt, shell=True, check=True)
         subprocess.run(move_command2, shell=True, check=True)
@@ -106,38 +102,3 @@ def backup_sql_server_database(server, user, password, dbname, backup_dir):
         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up SQL Server database: {e}")
-
-
-
-
-#prueba encriptar y  comprimir archivo sqlite.db
-#:)
-
-def backup_sqlite_database(db_file, backup_dir):
-     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-     backup_file = os.path.join(backup_dir, f"sqlite_backup_{timestamp}.txt")
-     rar_file_name = os.path.join(backup_dir, f"sqlite_backup_{timestamp}.rar")
-
-     try:
-         # Copiar el archivo de la base de datos
-         import shutil
-         shutil.copy(db_file, backup_file)
-
-         # Comprimir el archivo de respaldo
-         rar_command = f'"C:\\WinRAR\\WinRAR.exe" a -r {rar_file_name} {backup_file}'
-         rar_process = subprocess.run(rar_command, shell=True, capture_output=True, text=True)
-         if rar_process.returncode != 0:
-             print(f"RAR Output: {rar_process.stdout}")
-             print(f"RAR Error: {rar_process.stderr}")
-             raise subprocess.CalledProcessError(rar_process.returncode, rar_command)
-
-         # Eliminar el archivo de respaldo sin comprimir
-         os.remove(backup_file)
-
-         print(f"Backup of SQLite database completed successfully.")
-     except subprocess.CalledProcessError as e:
-         print(f"Error occurred while backing up SQLite database: {e}")
-     except OSError as e:
-         print(f"Error occurred while copying or deleting the database file: {e}")
-     except Exception as e:
-         print(f"An unexpected error occurred: {e}")

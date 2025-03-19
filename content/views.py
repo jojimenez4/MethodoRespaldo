@@ -40,7 +40,7 @@ def create_login_interface():
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
     username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
-    username_entry.insert(0, "root")  # Usuario por defecto
+    username_entry.insert(0, "admin")  # Usuario por defecto
     username_entry.pack(pady=5)
 
     # Etiqueta y campo para la contraseña
@@ -80,7 +80,7 @@ def create_server_interface():
     # Etiqueta y campo para el tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
     server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos", "MySQL", "MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
+    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos", "MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
     server_type.set("Seleccionar Base de Datos")
     server_type.pack(pady=5)
     
@@ -125,13 +125,8 @@ def create_server_interface():
                 'encrypted_password': encrypted_password
             }
 
-            if server_type_selected == "MySQL":
-                 db_file = "c:\\MethodoRespaldo\\database.db"  # Path para SQLite database file
-                 server_data['db_file'] = db_file
-                 messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
-                 server_window.destroy()
-                 open_selection_interface(server_data)
-            elif server_type_selected == "MySQL Server (TCP/IP)":
+        
+            if server_type_selected == "MySQL Server (TCP/IP)":
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
                     server_window.destroy()
