@@ -5,8 +5,7 @@ from tkcalendar import DateEntry
 import content.functions as f
 from tkinter import simpledialog
     
-
-customtkinter.set_appearance_mode("dark")
+customtkinter.set_appearance_mode("dark") 
 
 def create_login_interface():
     login_window = customtkinter.CTk()
@@ -19,7 +18,8 @@ def create_login_interface():
 
     
 
-    # Función para alternar el modo de apariencia
+    # Función para alternar el modo de apariencia esta wea no funciona
+
     # def toggle_apparanace_mode():
     #     current_mode = customtkinter.get_appearance_mode()
     #     new_mode = "light" if current_mode == "dark" else "dark"
@@ -34,6 +34,25 @@ def create_login_interface():
     #     command=toggle_apparanace_mode
     # )
     # apparance_switch.pack(pady=10, padx=10, anchor="ne")
+
+
+    #esta wea si cambia la apariencia de oscuro a claro
+
+    switch = customtkinter.StringVar(value="dark")
+
+    def switch_mode():
+        if switch.get() == "dark":
+            customtkinter.set_appearance_mode("light")
+            switch.set("light")
+        else:
+            customtkinter.set_appearance_mode("dark")
+            switch.set("dark")
+
+
+    
+    button = customtkinter.CTkSwitch(frame, textvariable=switch, command=switch_mode)
+    button.pack(pady=10, padx=10, anchor="ne")
+        
 
 
     # Etiqueta y campo para el nombre de usuario
@@ -248,16 +267,16 @@ def open_selection_interface(server_data=None):
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
     # Texto link para abrir la interfaz de configuración avanzada
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="white", cursor="hand2", width=30)
+    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
 
     # Función para cambiar el color al hacer hover
     def on_enter(event):
-        advanced_settings_link.configure(text_color="green")
+        advanced_settings_link.configure(text_color="deep sky blue")
 
     def on_leave(event):
-        advanced_settings_link.configure(text_color="white")
+        advanced_settings_link.configure(text_color="green")
 
 # Bind the hover events
     advanced_settings_link.bind("<Enter>", on_enter)
@@ -308,6 +327,7 @@ def open_calendar(parent_window):
             print(f"Fecha seleccionada: {selected_date}")
             print(f"Hora: {start_time}")
             calendar_window.destroy()
+
 
         select_button = customtkinter.CTkButton(calendar_window, text="Aplicar", command=select_date, fg_color="green")
         select_button.pack(pady=20)
@@ -368,6 +388,8 @@ def open_backup_interface(parent_window):
         parent_window.deiconify()  # Rehabilita la ventana padre
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    
 
     # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
     parent_window.withdraw()
