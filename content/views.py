@@ -35,6 +35,7 @@ def create_login_interface():
     # )
     # apparance_switch.pack(pady=10, padx=10, anchor="ne")
 
+
     # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
     username_label.pack(pady=5)
