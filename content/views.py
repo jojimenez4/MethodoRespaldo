@@ -16,27 +16,32 @@ def create_login_interface():
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
 
+    
+
+    
+
+
     #esta wea si cambia la apariencia de oscuro a claro
 
     switch = customtkinter.StringVar(value="dark")
 
+
+
     def switch_mode():
         if switch.get() == "dark":
             customtkinter.set_appearance_mode("light")
+            button.configure(text="claro")
             switch.set("light")
-            button.configure(text="claro")  # Cambia el texto a "Modo claro"
         else:
             customtkinter.set_appearance_mode("dark")
+            button.configure(text="oscuro")
             switch.set("dark")
-            button.configure(text="oscuro")  # Cambia el texto a "Modo oscuro"
-
-
-
-
     
     button = customtkinter.CTkSwitch(frame, command=switch_mode, text="oscuro")
     button.pack(pady=10, padx=10, anchor="ne")
         
+
+    
 
 
     # Etiqueta y campo para el nombre de usuario
