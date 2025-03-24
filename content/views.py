@@ -4,7 +4,8 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 from tkinter import simpledialog
-    
+import os    
+import datetime
 customtkinter.set_appearance_mode("dark") 
 
 def create_login_interface():
@@ -247,18 +248,43 @@ def open_selection_interface(server_data=None):
 
     
 
-    # Función para mostrar el historial de respaldos
+    # wea pa mostrar el historial de respaldos
     def show_backup_history():
         try:
-            # Aquí puedes agregar la lógica para obtener el historial de respaldos
-            backup_history = ["Backup 1 - 2023-01-01", "Backup 2 - 2023-02-01", "Backup 3 - 2023-03-01"] # Simulación de historial de respaldos
-            if not backup_history:
-                raise ValueError("No hay historial de respaldos disponible.")
+            # Directorio donde se guardan los respaldos
+            
+            backup_dir = "C:\\Respaldos"  # Ruta de respaldos
+
+            # Verificar si el directorio existe
+            if not os.path.exists(backup_dir):
+                raise ValueError("El directorio de respaldos no existe.")
+
+            # Obtener la lista de archivos en el directorio
+            backup_files = [
+                os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
+            ]
+
+            # Verificar si hay archivos de respaldo
+            if not backup_files:
+                raise ValueError("No hay respaldos disponibles.")
+
+            # Ordenar los archivos por fecha de modificación (más recientes primero)
+            backup_files.sort(key=os.path.getmtime, reverse=True)
+
+            # Crear una lista con los nombres de los archivos y sus fechas
+            backup_history = [
+                f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
+                for file in backup_files
+            ]
+
+            # Mostrar el historial en un cuadro de mensaje
             messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
         except ValueError as ve:
             messagebox.showinfo("Historial de Respaldos", str(ve))
         except Exception as e:
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
+
+            
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)

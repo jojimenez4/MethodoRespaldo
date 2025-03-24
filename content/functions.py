@@ -58,31 +58,49 @@ def bd_server_verify_sql_server(server, username, password):
         print(f"Error during SQL Server server verification: {err}")
         return False
 
-def backup_mysql_database(password, backup_dir):
+
+
+#MYSQL CONNEXION
+
+def backup_mysql_database(password, backup_dir, rar_password):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
     backup_file_name = f"prueba_backup_{timestamp}.txt"
     rar_file_name = f"prueba_backup_{timestamp}.rar"
-    decrypted_password = decrypt(KEY, password).decode("utf-8")
+    decrypted_password = decrypt(KEY, password).decode("utf-8")  # Desencriptar la contraseña de la base de datos
     
     mysql_bin_path = "C:\\mysql\\bin"
     mysqldump_path = os.path.join(mysql_bin_path, "mysqldump")
     rar_path = "C:\\WinRAR"
 
+    # Comando para realizar el respaldo de la base de datos
     command = f'"{mysqldump_path}" -e -R -u root -p"{decrypted_password}" bdpos > "{backup_file_name}"'
     move_command = f'move {backup_file_name} {rar_path}'
-    comprimir_command = f'"rar" a -p- {rar_file_name} {backup_file_name}"'
+    comprimir_command = f'"rar" a -p{rar_password} {rar_file_name} {backup_file_name}'
     delete_txt = f'del {backup_file_name}'
     move_command2 = f'move {rar_file_name} {backup_dir}'
 
     try:
-        os.chdir(mysql_bin_path,rar_path)
+        # Cambiar al directorio de MySQL bin
+        os.chdir(mysql_bin_path)
+        subprocess.run(command, shell=True, check=True)
+        
+        # Mover el archivo de respaldo al directorio de WinRAR
         subprocess.run(move_command, shell=True, check=True)
         
-        # Use Popen to send the password via stdin
-        rar_process = subprocess.Popen(comprimir_command, shell=True, stdin=subprocess.PIPE)
-        rar_process.communicate(input=decrypted_password)  # Encode the password to bytes
+        # Cambiar al directorio de WinRAR
+        os.chdir(rar_path)
+        
+        # Ejecutar el comando de compresión con la contraseña en texto plano
+        rar_process = subprocess.run(comprimir_command, shell=True, capture_output=True, text=True)
+        if rar_process.returncode != 0:
+            print(f"RAR Output: {rar_process.stdout}")
+            print(f"RAR Error: {rar_process.stderr}")
+            raise subprocess.CalledProcessError(rar_process.returncode, comprimir_command)
 
+        # Eliminar el archivo de texto original
         subprocess.run(delete_txt, shell=True, check=True)
+        
+        # Mover el archivo comprimido al directorio de destino
         subprocess.run(move_command2, shell=True, check=True)
         print(f"Backup of MySQL database completed successfully.")
     except subprocess.CalledProcessError as e:
@@ -92,6 +110,13 @@ def backup_mysql_database(password, backup_dir):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
+
+
+
+
+
+    #MYSQL SERVER CONEXION
+    
 def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
@@ -102,3 +127,10 @@ def backup_sql_server_database(server, user, password, dbname, backup_dir):
         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up SQL Server database: {e}")
+        
+        
+        
+        
+        
+        
+        
