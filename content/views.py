@@ -10,7 +10,6 @@ import threading
 customtkinter.set_appearance_mode("dark")
 
 def create_login_interface():
-   
     login_window = customtkinter.CTk()
     login_window.title("Login")
     login_window.geometry("400x300")
@@ -87,11 +86,8 @@ def create_server_interface():
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
-    scheduled = False  # Flag to indicate if scheduling is already done
-
     # Función para verificar el inicio de sesión
     def verify_server():
-        nonlocal scheduled
         try:
             server_ip = server_ip_entry.get()
             port = int(port_entry.get())
@@ -104,9 +100,6 @@ def create_server_interface():
             # Store server data
             server_data = {
                 'server_type': server_type_selected,
-                'server_ip': server_ip,
-                'port': port,
-                'username': username,
                 'encrypted_password': encrypted_password
             }
 
@@ -114,56 +107,20 @@ def create_server_interface():
                 if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL.")
                     server_window.destroy()
-                    open_selection_interface(server_data)
+                    open_backup_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
                     messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
                     server_window.destroy()
-                    open_selection_interface(server_data)
+                    open_backup_interface(server_data)
                 else:
                     messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                messagebox.showerror("Error", "No se ha seleccionado ninguna base de datos.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
-
-        # Schedule the backup task only once after the first execution
-        if not scheduled:
-            scheduled = True
-            messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
-            def schedule_backup():
-                schedule.every(5).minutes.do(execute_programed_backup, server_data=server_data)
-
-            def run_scheduler():
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
-
-            schedule_backup()
-            threading.Thread(target=run_scheduler, daemon=True).start()
-
-    def execute_programed_backup(server_data):
-        try:
-            if server_data is None:
-                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-                return
-            server_type_selected = server_data['server_type']
-            encrypted_password = server_data['encrypted_password']
-            folder_path = filedialog.askdirectory()
-            if server_type_selected == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(encrypted_password, folder_path)
-                message = f"Respaldo de MySQL completado. Carpeta: {folder_path}"
-                f.send_email(message)
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                f.backup_sql_server_database(encrypted_password, folder_path)
-            else:
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo programado: {e}")
-            message = f"Error al ejecutar el respaldo programado: {e}"
-            f.send_email(message)
 
     # Asigna la función verify_server al botón de inicio de sesión
     server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server)
@@ -173,9 +130,7 @@ def create_server_interface():
 
     server_window.mainloop()
 
-# def open_selection_interface(parent_window):
-
-def open_selection_interface(server_data=None):
+def open_backup_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
      # Cierra la ventana de inicio de sesión
 
@@ -220,7 +175,7 @@ def open_selection_interface(server_data=None):
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data))
     execute_button.pack(pady=10)
 
-    scheduled = False  # Flag to indicate if scheduling is already done
+    scheduled = False
 
     def execute_backup(folder_path_label, server_data):
         nonlocal scheduled
@@ -249,7 +204,6 @@ def open_selection_interface(server_data=None):
             message = f"Error al ejecutar el respaldo: {e}"
             f.send_email(message)
 
-        # Schedule the backup task only once after the first execution
         if not scheduled:
             scheduled = True
             messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
@@ -288,12 +242,11 @@ def open_selection_interface(server_data=None):
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
-    advanced_settings_link.bind("<Button-1>", lambda e: open_backup_interface(root))
+    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root))
 
     # Detectar el cierre de la ventana
     def on_closing():
         root.destroy()  # Cierra la ventana actual
-        # create_server_interface()  # Vuelve a abrir la ventana de inicio de sesión
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
@@ -341,7 +294,7 @@ def open_calendar(parent_window):
 
         calendar_window.protocol("WM_DELETE_WINDOW", lambda: calendar_window.destroy())
 
-def open_backup_interface(parent_window):
+def open_advance_options(parent_window):
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     root.geometry("500x600")
@@ -366,9 +319,9 @@ def open_backup_interface(parent_window):
     transaction_var = customtkinter.StringVar()
     transaction_checkbox = customtkinter.CTkCheckBox(frame, text="Encerrar exportación en una transacción --single-transaction", variable=transaction_var)
     transaction_checkbox.pack(pady=5, padx=30, anchor="w")
-
+    
     # Botón de Guardar y Cerrar
-    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window))
+    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: on_closing())
     save_button.pack(pady=20, padx=10)
 
     # Segunda sección: Opciones de Respaldo
@@ -395,12 +348,5 @@ def open_backup_interface(parent_window):
         parent_window.deiconify()  # Rehabilita la ventana padre
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
-
-    # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
-    parent_window.withdraw()
-
     root.mainloop()
 
-def close_and_return(current_window, parent_window):
-    current_window.destroy()
-    parent_window.deiconify()
