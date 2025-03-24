@@ -4,8 +4,10 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 from tkinter import simpledialog
+import threading
 import os    
 import datetime
+import time
 customtkinter.set_appearance_mode("dark") 
 
 def create_login_interface():
@@ -162,6 +164,40 @@ def create_server_interface():
 
     server_window.mainloop()
     
+# wea pa comprimir con contraseña
+
+def password_compress(folder_path_label, server_data):
+    folder_path = folder_path_label.replace("Destino: ", "")
+    if not folder_path:
+        messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
+        return
+
+    try:
+        if server_data is None:
+            messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+            return
+        
+        server_type_selected = server_data['server_type']
+        encrypted_password = server_data['encrypted_password']
+        
+        # Solicitar contraseña para el archivo comprimido
+        rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
+        if not rar_password:
+            messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
+            return
+
+        if server_type_selected == "MySQL Server (TCP/IP)":
+            f.backup_mysql_database(encrypted_password, folder_path, rar_password)
+            messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
+        elif server_type_selected == "SQL Server (Windows Authentication)":
+            f.backup_sql_server_database(encrypted_password, folder_path, rar_password)
+            messagebox.showinfo("Éxito", "Respaldo de SQL Server completado y comprimido con contraseña.")
+        else:
+            messagebox.showerror("Error", "Tipo de servidor no soportado.")
+            return
+    except Exception as e:
+        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+
 def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
     root = customtkinter.CTk()
@@ -209,69 +245,36 @@ def open_selection_interface(server_data=None):
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
 
-
-# wea pa comprimir con contraseña
-
-    def password_compress(folder_path_label, server_data):
-        folder_path = folder_path_label.replace("Destino: ", "")
-        if not folder_path:
-            messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
-            return
-
-        try:
-            if server_data is None:
-                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-                return
-            
-            server_type_selected = server_data['server_type']
-            encrypted_password = server_data['encrypted_password']
-            
-            # Solicitar contraseña para el archivo comprimido
-            rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
-            if not rar_password:
-                messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
-                return
-
-            if server_type_selected == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(encrypted_password, folder_path, rar_password)
-                messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                f.backup_sql_server_database(encrypted_password, folder_path, rar_password)
-                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado y comprimido con contraseña.")
-            else:
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
-                return
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-
     
 
     
 
     # wea pa mostrar el historial de respaldos
+    
     def show_backup_history():
         try:
             # Directorio donde se guardan los respaldos
             
             backup_dir = "C:\\Respaldos"  # Ruta de respaldos
 
-            # Verificar si el directorio existe
+            # Verifica si el directorio existe
             if not os.path.exists(backup_dir):
                 raise ValueError("El directorio de respaldos no existe.")
 
-            # Obtener la lista de archivos en el directorio
+            # lista de archivos 
             backup_files = [
                 os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
             ]
 
-            # Verificar si hay archivos de respaldo
+            # Verifica si hay archivos de respaldo
+            
             if not backup_files:
                 raise ValueError("No hay respaldos disponibles.")
 
-            # Ordenar los archivos por fecha de modificación (más recientes primero)
+            # Ordena los archivos por fecha de modificación
             backup_files.sort(key=os.path.getmtime, reverse=True)
 
-            # Crear una lista con los nombres de los archivos y sus fechas
+            # Crea una lista 
             backup_history = [
                 f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
                 for file in backup_files
@@ -298,7 +301,8 @@ def open_selection_interface(server_data=None):
     def on_leave(event):
         advanced_settings_link.configure(text_color="green")
 
-# Bind the hover events
+# hovers de la confi :p
+
     advanced_settings_link.bind("<Enter>", on_enter)
     advanced_settings_link.bind("<Leave>", on_leave)
 
@@ -310,49 +314,86 @@ def open_selection_interface(server_data=None):
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
     root.mainloop()
+    
+    
+    
+# Función para programar el respaldo automático
 
-calendar_window = None
+scheduled_time = None  # Global variable to store the scheduled time
+
+def schedule_backup():
+    global scheduled_time
+    while True:
+        if scheduled_time:
+            # Obtener la hora actual
+            current_time = datetime.datetime.now().strftime("%H:%M")
+            if current_time == scheduled_time:
+                try:
+                    # Llamar a la función de respaldo automático
+                    folder_path = "C:\\Respaldos"  # Cambia esto a tu ruta real
+                    server_data = {
+                        "server_type": "MySQL Server (TCP/IP)",
+                        "encrypted_password": f.encrypt(f.KEY, b"Pollox.12345")  # Cambia esto a tu contraseña
+                    }
+                    password_compress(f"Destino: {folder_path}", server_data)  # Llamar correctamente
+                except Exception as e:
+                    print(f"Error al realizar el respaldo automático: {e}")
+                finally:
+                    # Esperar un minuto para evitar múltiples ejecuciones en el mismo minuto
+                    time.sleep(60)
+        time.sleep(1)  # Verificar cada segundo
 
 def open_calendar(parent_window):
-    global calendar_window
-    if calendar_window is None or not calendar_window.winfo_exists():
-        calendar_window = customtkinter.CTkToplevel(parent_window)
-        calendar_window.title("Respaldo automatico") 
-        calendar_window.geometry("300x300")
-        calendar_window.transient(parent_window)  # Show on top
+    global scheduled_time
+    time_window = customtkinter.CTkToplevel(parent_window)
+    time_window.title("Programar Respaldo Automático")
+    time_window.geometry("300x250")
+    time_window.transient(parent_window)
 
-        calendar = DateEntry(calendar_window, width=12, background='darkblue', foreground='white', borderwidth=2)
-        calendar.pack(pady=20)
+    # Etiqueta para la fecha actual
+    current_date_label = customtkinter.CTkLabel(time_window, text=f"Fecha actual: {datetime.datetime.now().strftime('%Y-%m-%d')}")
+    current_date_label.pack(pady=10)
 
-        # Cuadro de entrada para la hora de inicio
-        start_time_label = customtkinter.CTkLabel(calendar_window, text="Hora de inicio:", width=20)
-        start_time_label.pack(pady=5)
+    # Etiqueta para la hora
+    hour_label = customtkinter.CTkLabel(time_window, text="Seleccione hora (HH:MM):")
+    hour_label.pack(pady=10)
 
-        start_time_frame = customtkinter.CTkFrame(calendar_window)
-        start_time_frame.pack(pady=5)
+    # Frame para los cuadros de selección de hora y minutos
+    time_frame = customtkinter.CTkFrame(time_window)
+    time_frame.pack(pady=10)
 
-        start_hour_spinbox = tk.Spinbox(start_time_frame, from_=0, to=23, width=2, format="%02.0f")
-        start_hour_spinbox.pack(side="left", padx=(20, 5))
-        start_hour_label = customtkinter.CTkLabel(start_time_frame, text="hh", width=5)
-        start_hour_label.pack(side="left")
+    # Spinbox para la hora
+    hour_spinbox = tk.Spinbox(time_frame, from_=0, to=23, width=3, format="%02.0f")
+    hour_spinbox.pack(side="left", padx=5)
 
-        start_minute_spinbox = tk.Spinbox(start_time_frame, from_=0, to=59, width=2, format="%02.0f")
-        start_minute_spinbox.pack(side="left", padx=(20, 5))
-        start_minute_label = customtkinter.CTkLabel(start_time_frame, text="mm", width=5)
-        start_minute_label.pack(side="left")
+    # Separador entre hora y minutos
+    separator_label = customtkinter.CTkLabel(time_frame, text=":")
+    separator_label.pack(side="left", padx=5)
 
-        def select_date():
-            selected_date = calendar.get_date()
-            start_time = f"{start_hour_spinbox.get()}:{start_minute_spinbox.get()}"
-            print(f"Fecha seleccionada: {selected_date}")
-            print(f"Hora: {start_time}")
-            calendar_window.destroy()
+    # Spinbox para los minutos
+    minute_spinbox = tk.Spinbox(time_frame, from_=0, to=59, width=3, format="%02.0f")
+    minute_spinbox.pack(side="left", padx=5)
 
+    # Botón para guardar la hora programada
+    def save_time():
+        global scheduled_time
+        selected_time = f"{hour_spinbox.get()}:{minute_spinbox.get()}"
+        try:
+            # Validar el formato de la hora
+            datetime.datetime.strptime(selected_time, "%H:%M")
+            scheduled_time = selected_time
+            messagebox.showinfo("Éxito", f"Respaldo programado para hoy a las {scheduled_time}.")
+            time_window.destroy()
+        except ValueError:
+            messagebox.showerror("Error", "Formato de hora inválido. Use HH:MM.")
+            
 
-        select_button = customtkinter.CTkButton(calendar_window, text="Aplicar", command=select_date, fg_color="green")
-        select_button.pack(pady=20)
+    save_button = customtkinter.CTkButton(time_window, text="Aplicar", command=save_time, fg_color="green")
+    save_button.pack(pady=20)
+    
+    
 
-        calendar_window.protocol("WM_DELETE_WINDOW", lambda: calendar_window.destroy())
+    #time_window.protocol("WM_DELETE_WINDOW", lambda: time_window.destroy())
 
 def open_backup_interface(parent_window):
     root = customtkinter.CTk()

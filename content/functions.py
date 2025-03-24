@@ -131,6 +131,12 @@ def backup_sql_server_database(server, user, password, dbname, backup_dir):
         
         
         
+
+#auto backup
+
+
+        
+        
         
         
         
