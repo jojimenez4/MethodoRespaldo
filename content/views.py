@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
 from tkinter import simpledialog
-import threading
+from tkinter import ttk
 import os    
 import datetime
 import time
@@ -179,13 +179,34 @@ def password_compress(folder_path_label, server_data):
         
         server_type_selected = server_data['server_type']
         encrypted_password = server_data['encrypted_password']
-        
+
         # Solicitar contraseña para el archivo comprimido
         rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
         if not rar_password:
             messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
             return
 
+        progress_window = customtkinter.CTkToplevel()
+        progress_window.title("Progreso")
+        progress_window.geometry("400x150")
+
+        # Centrar la ventana de progreso en la pantalla
+        parent_x = progress_window.winfo_screenwidth() // 2
+        parent_y = progress_window.winfo_screenheight() // 2
+        progress_window.geometry(f"+{parent_x - 200}+{parent_y - 75}")
+
+        progress_label = customtkinter.CTkLabel(progress_window, text="Realizando respaldo, por favor espere...")
+        progress_label.pack(pady=10)
+
+        # Barra de progreso
+        progress_bar = ttk.Progressbar(progress_window, orient="horizontal", mode="indeterminate", length=300)
+        progress_bar.pack(pady=10)
+        progress_bar.start()  # Inicia la animación de la barra de progreso
+        
+        progress_window.update()  # Actualiza la ventana para mostrar los cambios
+
+
+        # Realizar el respaldo según el tipo de servidor
         if server_type_selected == "MySQL Server (TCP/IP)":
             f.backup_mysql_database(encrypted_password, folder_path, rar_password)
             messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
@@ -197,6 +218,9 @@ def password_compress(folder_path_label, server_data):
             return
     except Exception as e:
         messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+    finally:
+        progress_bar.stop()  # Detiene la animación de la barra de progreso
+        progress_window.destroy()  # Cierra la ventana de progreso
 
 def open_selection_interface(server_data=None):
     """Abre la interfaz de selección de documentos."""
@@ -245,17 +269,14 @@ def open_selection_interface(server_data=None):
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
 
-    
+     
 
-    
-
-    # wea pa mostrar el historial de respaldos
-    
+    # wea pa mostrar el historial de respaldos  
     def show_backup_history():
         try:
             # Directorio donde se guardan los respaldos
             
-            backup_dir = "C:\\Respaldos"  # Ruta de respaldos
+            backup_dir = "C:\\respaldo"  # Ruta de respaldos
 
             # Verifica si el directorio existe
             if not os.path.exists(backup_dir):
@@ -317,7 +338,7 @@ def open_selection_interface(server_data=None):
     
     
     
-# Función para programar el respaldo automático
+# Función pa programar repaldo 
 
 scheduled_time = None  # Global variable to store the scheduled time
 
@@ -330,10 +351,10 @@ def schedule_backup():
             if current_time == scheduled_time:
                 try:
                     # Llamar a la función de respaldo automático
-                    folder_path = "C:\\Respaldos"  # Cambia esto a tu ruta real
+                    folder_path = "C:\\respaldo"  # Cambia esto a tu ruta real
                     server_data = {
                         "server_type": "MySQL Server (TCP/IP)",
-                        "encrypted_password": f.encrypt(f.KEY, b"Pollox.12345")  # Cambia esto a tu contraseña
+                        "encrypted_password": f.encrypt(f.KEY, b"Freya-100MTH")  # Cambia esto a tu contraseña
                     }
                     password_compress(f"Destino: {folder_path}", server_data)  # Llamar correctamente
                 except Exception as e:
