@@ -11,6 +11,7 @@ from Crypto.Hash import SHA256
 
 KEY = os.getenv("KEY_DECRYPT").encode("utf-8")
 user = os.getenv("USER")
+bd = os.getenv("DATABASE")
 sender_email = os.getenv("EMAIL_ADRESS")
 sender_password = os.getenv("EMAIL_PASSWORD")
 
@@ -60,17 +61,17 @@ def bd_server_verify_sql_server(server, username, password):
     except pyodbc.Error as err:
         print(f"Error during SQL Server server verification: {err}")
         return False
-
+    
 def backup_mysql_database(password, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
     backup_file_name = f"prueba_backup_{timestamp}.txt"
     rar_file_name = f"prueba_backup_{timestamp}.rar"
-    decrypted_password = decrypt(KEY, password).decode("utf-8")
+    decrypted_password = decrypt(KEY, password).decode("utf-8")  
     
     mysql_bin_path = "C:\\mysql\\bin"
     rar_path = "C:\\WinRAR"
 
-    command = f'mysqldump -e -R -u root -p{decrypted_password} bdpos > "{backup_file_name}"'
+    command = f'mysqldump -e -R -u root -p{decrypted_password} {bd} > "{backup_file_name}"'
     move_command = f'move {backup_file_name} {rar_path}'
     comprimir_command = f'"rar" a -p {rar_file_name} {backup_file_name}"'
     delete_txt = f'del {backup_file_name}'
@@ -80,8 +81,8 @@ def backup_mysql_database(password, backup_dir):
         os.chdir(mysql_bin_path)
         subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
         subprocess.run(move_command, shell=True, check=True)
-        os.chdir(rar_path)
-        
+
+        os.chdir(rar_path)     
         rar_process = subprocess.run(comprimir_command, shell=True, input=decrypted_password, capture_output=True, text=True)
         if rar_process.returncode != 0:
             print(f"RAR Output: {rar_process.stdout}")
@@ -96,11 +97,10 @@ def backup_mysql_database(password, backup_dir):
         print(f"Error changing directory: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-
+    
 def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
-    
     command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{dbname}] TO DISK='{backup_file}'\""
     try:
         subprocess.run(command, shell=True, check=True)
@@ -117,7 +117,7 @@ def send_email(message):
             server.ehlo()
             server.starttls()
             server.login(sender_email, sender_password)
-            email_message = f"Subject: Aviso Respaldo\n\n{message}"
+            email_message = f"Subject: Respaldo completado con exito\n\n{message}"
             server.sendmail(sender_email, receiver_email, email_message)
             server.quit()
     except smtplib.SMTPAuthenticationError as e:
@@ -127,7 +127,34 @@ def send_email(message):
             server.ehlo()
             server.starttls()
             server.login(sender_email, sender_password)
-            email_message = f"Subject: Aviso Respaldo\n\n{message}"
+            email_message = f"Subject: Respaldo no completado por errores\n\n{message}"
             server.sendmail(sender_email, receiver_email, email_message)
             server.quit()
     return True
+
+def get_database_name(host, port, user, password):
+    try:
+        decrypted_password = decrypt(KEY, password).decode("utf-8")
+        connect = [host, port, user, decrypted_password, bd]
+        connection = mysql.connector.connect(
+            host=connect[0],
+            port=connect[1],
+            user=connect[2],
+            password=connect[3],
+            database=connect[4]
+        )
+        cursor = connection.cursor()
+        cursor.execute("SELECT nombre FROM conf_sistema")
+        result = cursor.fetchone()
+        connection.close()
+        if result:
+            return result[0]
+        else:
+            return "Nombre no encontrado en conf_sistema"
+    except mysql.connector.Error as err:
+        print(f"Error during database operation: {err}")
+        return f"Database error: {err}"
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return f"An unexpected error occurred: {e}"
+
