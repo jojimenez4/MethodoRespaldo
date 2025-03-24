@@ -87,8 +87,11 @@ def create_server_interface():
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
+    scheduled = False  # Flag to indicate if scheduling is already done
+
     # Función para verificar el inicio de sesión
     def verify_server():
+        nonlocal scheduled
         try:
             server_ip = server_ip_entry.get()
             port = int(port_entry.get())
@@ -125,6 +128,42 @@ def create_server_interface():
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
+
+        # Schedule the backup task only once after the first execution
+        if not scheduled:
+            scheduled = True
+            messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
+            def schedule_backup():
+                schedule.every(5).minutes.do(execute_programed_backup, server_data=server_data)
+
+            def run_scheduler():
+                while True:
+                    schedule.run_pending()
+                    time.sleep(1)
+
+            schedule_backup()
+            threading.Thread(target=run_scheduler, daemon=True).start()
+
+    def execute_programed_backup(server_data):
+        try:
+            if server_data is None:
+                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                return
+            server_type_selected = server_data['server_type']
+            encrypted_password = server_data['encrypted_password']
+            folder_path = filedialog.askdirectory()
+            if server_type_selected == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(encrypted_password, folder_path)
+                message = f"Respaldo de MySQL completado. Carpeta: {folder_path}"
+                f.send_email(message)
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                f.backup_sql_server_database(encrypted_password, folder_path)
+            else:
+                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo programado: {e}")
+            message = f"Error al ejecutar el respaldo programado: {e}"
+            f.send_email(message)
 
     # Asigna la función verify_server al botón de inicio de sesión
     server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server)
@@ -215,7 +254,7 @@ def open_selection_interface(server_data=None):
             scheduled = True
             messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
             def schedule_backup():
-                schedule.every(5).minutes.do(execute_backup, folder_path_label=rounded_label.cget("text"), server_data=server_data)
+                schedule.every(5).minutes.do(execute_programed_backup, folder_path_label=rounded_label.cget("text"), server_data=server_data)
 
             def run_scheduler():
                 while True:
@@ -224,6 +263,27 @@ def open_selection_interface(server_data=None):
 
             schedule_backup()
             threading.Thread(target=run_scheduler, daemon=True).start()
+
+    def execute_programed_backup():
+        try:
+            if server_data is None:
+                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                return
+            server_type_selected = server_data['server_type']
+            encrypted_password = server_data['encrypted_password']
+            folder_path = rounded_label.cget("text").replace("Destino: ", "")
+            if server_type_selected == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(encrypted_password, folder_path)
+                message = f"Respaldo de MySQL completado. Carpeta: {folder_path}"
+                f.send_email(message)
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                f.backup_sql_server_database(encrypted_password, folder_path)
+            else:
+                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo programado: {e}")
+            message = f"Error al ejecutar el respaldo programado: {e}"
+            f.send_email(message)
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)
