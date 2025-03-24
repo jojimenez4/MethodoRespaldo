@@ -3,6 +3,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkcalendar import DateEntry
 import content.functions as f
+import schedule
+import time
+import threading
 
 customtkinter.set_appearance_mode("dark")
 
@@ -178,23 +181,25 @@ def open_selection_interface(server_data=None):
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data))
     execute_button.pack(pady=10)
 
+    scheduled = False  # Flag to indicate if scheduling is already done
+
     def execute_backup(folder_path_label, server_data):
+        nonlocal scheduled
         folder_path = folder_path_label.replace("Destino: ", "")
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
-
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
-
             server_type_selected = server_data['server_type']
             encrypted_password = server_data['encrypted_password']
-
             if server_type_selected == "MySQL Server (TCP/IP)":
                 f.backup_mysql_database(encrypted_password, folder_path)
                 messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+                message = f"Respaldo de MySQL completado. Carpeta: {folder_path}"
+                f.send_email(message)
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 f.backup_sql_server_database(encrypted_password, folder_path)
                 messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
@@ -202,6 +207,23 @@ def open_selection_interface(server_data=None):
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            message = f"Error al ejecutar el respaldo: {e}"
+            f.send_email(message)
+
+        # Schedule the backup task only once after the first execution
+        if not scheduled:
+            scheduled = True
+            messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
+            def schedule_backup():
+                schedule.every(5).minutes.do(execute_backup, folder_path_label=rounded_label.cget("text"), server_data=server_data)
+
+            def run_scheduler():
+                while True:
+                    schedule.run_pending()
+                    time.sleep(1)
+
+            schedule_backup()
+            threading.Thread(target=run_scheduler, daemon=True).start()
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", font=("Arial", 12), text_color="blue", cursor="hand2", width=30)

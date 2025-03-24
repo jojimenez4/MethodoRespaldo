@@ -2,18 +2,21 @@ import os
 import subprocess
 import datetime
 import base64
+import mysql.connector
+import pyodbc
+import smtplib
 from Crypto.Cipher import AES
 from Crypto import Random
 from Crypto.Hash import SHA256
-import mysql.connector
-import pyodbc
 
-KEY = b"METHODO_PROVIDENCIA2025"  # encryption key
-user = "root"
+KEY = os.getenv("KEY_DECRYPT").encode("utf-8")
+user = os.getenv("USER")
+sender_email = os.getenv("EMAIL_ADRESS")
+sender_password = os.getenv("EMAIL_PASSWORD")
 
 def encrypt(key, source, encode=True):
     key = SHA256.new(key).digest()
-    IV = Random.new().read(AES.block_size)
+    IV = Random.new().read(AES.block_size) 
     encryptor = AES.new(key, AES.MODE_CBC, IV)
     padding = AES.block_size - len(source) % AES.block_size
     source += bytes([padding]) * padding
@@ -25,7 +28,7 @@ def decrypt(key, source, decode=True):
         source = base64.b64decode(source.encode("latin-1"))
     key = SHA256.new(key).digest()
     IV = source[:AES.block_size]
-    decryptor = AES.new(key, AES.MODE_CBC, IV)  # Correctly initialize the AES decryptor with the mode
+    decryptor = AES.new(key, AES.MODE_CBC, IV)  
     data = decryptor.decrypt(source[AES.block_size:])
     padding = data[-1]
     if data[-padding:] != bytes([padding]) * padding:
@@ -65,22 +68,21 @@ def backup_mysql_database(password, backup_dir):
     decrypted_password = decrypt(KEY, password).decode("utf-8")
     
     mysql_bin_path = "C:\\mysql\\bin"
-    mysqldump_path = os.path.join(mysql_bin_path, "mysqldump")
     rar_path = "C:\\WinRAR"
 
-    command = f'"{mysqldump_path}" -e -R -u root -p"{decrypted_password}" bdpos > "{backup_file_name}"'
+    command = f'mysqldump -e -R -u root -p{decrypted_password} bdpos > "{backup_file_name}"'
     move_command = f'move {backup_file_name} {rar_path}'
-    comprimir_command = f'"rar" a -p- {rar_file_name} {backup_file_name}"'
+    comprimir_command = f'"rar" a -p {rar_file_name} {backup_file_name}"'
     delete_txt = f'del {backup_file_name}'
     move_command2 = f'move {rar_file_name} {backup_dir}'
 
     try:
         os.chdir(mysql_bin_path)
-        subprocess.run(command, shell=True, check=True)
+        subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
         subprocess.run(move_command, shell=True, check=True)
         os.chdir(rar_path)
         
-        rar_process = subprocess.run(comprimir_command, shell=True, input=password, capture_output=True, text=True)
+        rar_process = subprocess.run(comprimir_command, shell=True, input=decrypted_password, capture_output=True, text=True)
         if rar_process.returncode != 0:
             print(f"RAR Output: {rar_process.stdout}")
             print(f"RAR Error: {rar_process.stderr}")
@@ -88,7 +90,6 @@ def backup_mysql_database(password, backup_dir):
 
         subprocess.run(delete_txt, shell=True, check=True)
         subprocess.run(move_command2, shell=True, check=True)
-        print(f"Backup of MySQL database completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up MySQL database: {e}")
     except OSError as e:
@@ -106,3 +107,27 @@ def backup_sql_server_database(server, user, password, dbname, backup_dir):
         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
     except subprocess.CalledProcessError as e:
         print(f"Error occurred while backing up SQL Server database: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+def send_email(message):
+    receiver_email = "jose.jimenez@methodo.cl"
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(sender_email, sender_password)
+            email_message = f"Subject: Aviso Respaldo\n\n{message}"
+            server.sendmail(sender_email, receiver_email, email_message)
+            server.quit()
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"Error occurred while authenticating: {e}")
+    except Exception as e:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(sender_email, sender_password)
+            email_message = f"Subject: Aviso Respaldo\n\n{message}"
+            server.sendmail(sender_email, receiver_email, email_message)
+            server.quit()
+    return True
