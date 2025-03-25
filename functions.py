@@ -1,20 +1,24 @@
 import os
+import dotenv
 import subprocess
 import datetime
 import base64
 import mysql.connector
 import pyodbc
 import smtplib
+import mysql.connector.locales.eng.client_error
 from Crypto.Cipher import AES
 from Crypto import Random
 from Crypto.Hash import SHA256
 
-KEY = os.getenv("KEY_DECRYPT").encode("utf-8")
-user = os.getenv("USER")
-bd = os.getenv("DATABASE")
-sender_email = os.getenv("EMAIL_ADRESS")
-sender_password = os.getenv("EMAIL_PASSWORD")
-backup_pass = os.getenv("BACKUP_PASSWORD")
+dotenv.load_dotenv()
+
+KEY = os.getenv("KEY").encode("utf-8")
+USER = os.getenv("USER")
+DATABASE = os.getenv("DATABASE")
+EMAIL_ADRESS = os.getenv("EMAIL_ADRESS")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+BACKUP_PASSWORD = os.getenv("BACKUP_PASSWORD")
 
 def encrypt(key, source, encode=True):
     key = SHA256.new(key).digest()
@@ -40,7 +44,7 @@ def decrypt(key, source, decode=True):
 def bd_connect_mysql(host, port, password):
     try:
         decrypted_password = decrypt(KEY, password).decode("utf-8")
-        connect = [host, port, user, decrypted_password, bd]
+        connect = [host, port, USER, decrypted_password, DATABASE]
         connection = mysql.connector.connect(
             host=connect[0],
             port=connect[1],
@@ -53,13 +57,15 @@ def bd_connect_mysql(host, port, password):
         result = cursor.fetchone()
         connection.close()
         if result:
-            return result[0]
+            return result[0], True
         else:
-            return "Nombre no encontrado en conf_sistema"
+            return "Nombre no encontrado en conf_sistema", False
     except mysql.connector.Error as err:
-        return f"Error en Base de Datos: {err}"
+        return f"Error en Base de Datos: {err}", False
+    except pyodbc.Error as err:
+        return f"Error en Base de Datos: {err}", False
     except Exception as e:
-        return f"Un error inesperado a ocurrido: {e}"
+        return f"Un error inesperado a ocurrido: {e}", False
 
 # def bd_server_verify_sql_server(server, username, password):
     try:
@@ -72,16 +78,18 @@ def bd_connect_mysql(host, port, password):
         print(f"Error during SQL Server server verification: {err}")
         return False
     
-def backup_mysql_database(password, backup_dir, client):
+def backup_mysql_database(password, backup_dir, client, update_callback=None):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
     decrypted_password = decrypt(KEY, password).decode("utf-8")
+    if " " in client:
+        client = client.replace(" ", "_")
     backup_file_name = f"{client}_backup_{timestamp}.txt"
     rar_file_name = f"{client}_backup_{timestamp}.rar"
     
     mysql_bin_path = "C:\\mysql\\bin"
     rar_path = "C:\\WinRAR"
 
-    command = f'mysqldump -e -R -u root -p{decrypted_password} {bd} > "{backup_file_name}"'
+    command = f'mysqldump -e -R -u root -p{decrypted_password} {DATABASE} > "{backup_file_name}"'
     move_command = f'move {backup_file_name} {rar_path}'
     comprimir_command = f'"rar" a -p {rar_file_name} {backup_file_name}"'
     delete_txt = f'del {backup_file_name}'
@@ -89,18 +97,30 @@ def backup_mysql_database(password, backup_dir, client):
 
     try:
         os.chdir(mysql_bin_path)
+        if update_callback:
+            update_callback(10, "Iniciando respaldo...")
         subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+        if update_callback:
+            update_callback(30, "Moviendo archivo temporal...")
         subprocess.run(move_command, shell=True, check=True)
 
-        os.chdir(rar_path)     
-        rar_process = subprocess.run(comprimir_command, shell=True, input=backup_pass, capture_output=True, text=True)
+        os.chdir(rar_path)
+        if update_callback:
+            update_callback(50, "Comprimiendo respaldo...")     
+        rar_process = subprocess.run(comprimir_command, shell=True, input=BACKUP_PASSWORD, capture_output=True, text=True)
         if rar_process.returncode != 0:
             print(f"RAR Output: {rar_process.stdout}")
             print(f"RAR Error: {rar_process.stderr}")
             raise subprocess.CalledProcessError(rar_process.returncode, comprimir_command)
 
+        if update_callback:
+            update_callback(70, "Eliminando archivo temporal...")
         subprocess.run(delete_txt, shell=True, check=True)
+        if update_callback:
+            update_callback(90, "Moviendo respaldo a destino...")
         subprocess.run(move_command2, shell=True, check=True)
+        if update_callback:
+            update_callback(100, "Respaldo completado.")
         message = f"""
                 Estimados de {client},
                 Junto con saludar, le informamos que el respaldo de datos programado para el dia de hoy, {timestamp},
@@ -117,17 +137,17 @@ def backup_mysql_database(password, backup_dir, client):
     except Exception as e:
         send_email(f"Error inesperado: {e}")
     
-def backup_sql_server_database(server, user, password, dbname, backup_dir):
-    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
-    command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{dbname}] TO DISK='{backup_file}'\""
-    try:
-        subprocess.run(command, shell=True, check=True)
-        print(f"Backup of SQL Server database '{dbname}' completed successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred while backing up SQL Server database: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+# # def backup_sql_server_database(server, user, password, dbname, backup_dir):
+#     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+#     backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
+#     command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{dbname}] TO DISK='{backup_file}'\""
+#     try:
+#         subprocess.run(command, shell=True, check=True)
+#         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
+#     except subprocess.CalledProcessError as e:
+#         print(f"Error occurred while backing up SQL Server database: {e}")
+#     except Exception as e:
+#         print(f"An unexpected error occurred: {e}")
 
 def send_email(message):
     receiver_email = "jose.jimenez@methodo.cl"
@@ -135,19 +155,16 @@ def send_email(message):
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.ehlo()
             server.starttls()
-            server.login(sender_email, sender_password)
-            email_message = f"Subject: Respaldo completado con exito\n\n{message}"
-            server.sendmail(sender_email, receiver_email, email_message)
+            server.login(EMAIL_ADRESS, EMAIL_PASSWORD)
+            subject = "Respaldo completado con exito"
+            if "Error" in message:
+                subject = "Respaldo interrumpido por error"
+            email_message = f"Subject: {subject}\n\n{message}"
+            server.sendmail(EMAIL_ADRESS, receiver_email, email_message)
             server.quit()
     except smtplib.SMTPAuthenticationError as e:
         print(f"Error occurred while authenticating: {e}")
     except Exception as e:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(sender_email, sender_password)
-            email_message = f"Subject: Respaldo no completado por errores\n\n{message}"
-            server.sendmail(sender_email, receiver_email, email_message)
-            server.quit()
+        print(f"Error occurred while sending email: {e}")
     return True
 

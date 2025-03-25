@@ -5,7 +5,7 @@ import threading
 import schedule
 import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk
-import content.functions as f
+from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
 
 customtkinter.set_appearance_mode("dark") 
 
@@ -107,20 +107,19 @@ def create_server_interface():
             host = server_ip_entry.get()
             port = int(port_entry.get())
             password = password_entry.get().encode("utf-8")
-            key = f.KEY
-            encrypted_password = f.encrypt(key, password)
+            encrypted_password = encrypt(KEY, password)
             server_type_selected = server_type.get()
             client = ""
 
             if server_type_selected == "MySQL Server (TCP/IP)":
-                client = f.bd_connect_mysql(host, port, encrypted_password)
-                if client:
+                client, connection_success = bd_connect_mysql(host, port, encrypted_password)
+                if connection_success :
                     server_data = [server_type_selected, host, port, encrypted_password, client]
                     messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos MySQL. Cliente: {client}")
                     server_window.destroy()
                     open_backup_interface(server_data)
                 else:
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
+                    messagebox.showerror("Error", f"Error en la conexión a la base de datos MySQL: {client}")
             # elif server_type_selected == "SQL Server (Windows Authentication)":
             #     if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
             #         messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
@@ -191,99 +190,70 @@ def open_backup_interface(server_data=None):
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
+        
+        # Crear una ventana de progreso
+        progress_window = customtkinter.CTkToplevel(root)
+        progress_window.title("Realizando Respaldo")
+        progress_window.geometry("300x100")
+        progress_window.grab_set()  
+
+        # Barra de progreso
+        progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
+        progressbar.pack(pady=10, padx=10)
+
+        # Etiqueta para mostrar el progreso
+        progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
+        progress_label.pack(pady=5)
+
+        def update_progress(value, text):
+            progressbar['value'] = value
+            progress_label.configure(text=text)
+            progress_window.update_idletasks()
+
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                progress_window.destroy()
                 return
             if  server_data[0] == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(server_data[3], folder_path, server_data[4])
-                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+                def backup_with_progress():
+                    try:
+                        backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    finally:
+                        progress_window.destroy()
+
+                threading.Thread(target=backup_with_progress, daemon=True).start()
             # elif server_type_selected == "SQL Server (Windows Authentication)":
             #     f.backup_sql_server_database(encrypted_password, folder_path)
             #     messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                progress_window.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            progress_window.destroy()
 
         if not scheduled:
             scheduled = True
-            messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
             def schedule_backup():
                 schedule.every(5).minutes.do(execute_programed_backup, folder_path, server_data=server_data)
-
+                messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
             def run_scheduler():
                 while True:
                     schedule.run_pending()
                     time.sleep(1)
-
             schedule_backup()
             threading.Thread(target=run_scheduler, daemon=True).start()
 
-    # def password_compress(folder_path_label, server_data):
-    #     folder_path = folder_path_label.replace("Destino: ", "")
-    #     if not folder_path:
-    #         messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
-    #         return
-
-    #     try:
-    #         if server_data is None:
-    #             messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-    #             return
-            
-    #         server_type_selected = server_data['server_type']
-    #         encrypted_password = server_data['encrypted_password']
-
-    #         # Solicitar contraseña para el archivo comprimido
-    #         rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
-    #         if not rar_password:
-    #             messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
-    #             return
-
-    #         progress_window = customtkinter.CTkToplevel()
-    #         progress_window.title("Progreso")
-    #         progress_window.geometry("400x150")
-
-    #         # Centrar la ventana de progreso en la pantalla
-    #         parent_x = progress_window.winfo_screenwidth() // 2
-    #         parent_y = progress_window.winfo_screenheight() // 2
-    #         progress_window.geometry(f"+{parent_x - 200}+{parent_y - 75}")
-
-    #         progress_label = customtkinter.CTkLabel(progress_window, text="Realizando respaldo, por favor espere...")
-    #         progress_label.pack(pady=10)
-
-    #         # Barra de progreso
-    #         progress_bar = ttk.Progressbar(progress_window, orient="horizontal", mode="indeterminate", length=300)
-    #         progress_bar.pack(pady=10)
-    #         progress_bar.start()  # Inicia la animación de la barra de progreso
-            
-    #         progress_window.update()  # Actualiza la ventana para mostrar los cambios
-
-
-    #         # Realizar el respaldo según el tipo de servidor
-    #         if server_type_selected == "MySQL Server (TCP/IP)":
-    #             f.backup_mysql_database(encrypted_password, folder_path, rar_password)
-    #             messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
-    #         elif server_type_selected == "SQL Server (Windows Authentication)":
-    #             f.backup_sql_server_database(encrypted_password, folder_path, rar_password)
-    #             messagebox.showinfo("Éxito", "Respaldo de SQL Server completado y comprimido con contraseña.")
-    #         else:
-    #             messagebox.showerror("Error", "Tipo de servidor no soportado.")
-    #             return
-    #     except Exception as e:
-    #         messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-    #     finally:
-    #         progress_bar.stop()  # Detiene la animación de la barra de progreso
-    #         progress_window.destroy()  # Cierra la ventana de progreso
-    
     def execute_programed_backup(folder_path, server_data):
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
             if  server_data[0] == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(server_data[3], folder_path, server_data[4])
-                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+                backup_mysql_database(server_data[3], folder_path, server_data[4])
             # elif server_type_selected == "SQL Server (Windows Authentication)":
             #     f.backup_sql_server_database(encrypted_password, folder_path)
             #     messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
@@ -292,8 +262,7 @@ def open_backup_interface(server_data=None):
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             message = f"Error al ejecutar el respaldo: {e}"
-            f.send_email(message)
-
+            send_email(message)
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
