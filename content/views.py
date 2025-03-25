@@ -104,37 +104,30 @@ def create_server_interface():
     # Función para verificar el inicio de sesión
     def verify_server():
         try:
-            server_ip = server_ip_entry.get()
+            host = server_ip_entry.get()
             port = int(port_entry.get())
-            username = f.user
             password = password_entry.get().encode("utf-8")
             key = f.KEY
             encrypted_password = f.encrypt(key, password)
             server_type_selected = server_type.get()
-
-            # Store server data
-            server_data = {
-                'server_type': server_type_selected,
-                'server_ip': server_ip,
-                'port': port,
-                'username': username,
-                'encrypted_password': encrypted_password
-            }
+            client = ""
 
             if server_type_selected == "MySQL Server (TCP/IP)":
-                if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
-                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
+                client = f.bd_connect_mysql(host, port, encrypted_password)
+                if client:
+                    server_data = [server_type_selected, host, port, encrypted_password, client]
+                    messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos MySQL. Cliente: {client}")
                     server_window.destroy()
                     open_backup_interface(server_data)
                 else:
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL Server.")
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
-                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-                    server_window.destroy()
-                    open_backup_interface(server_data)
-                else:
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
+                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL.")
+            # elif server_type_selected == "SQL Server (Windows Authentication)":
+            #     if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
+            #         messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
+            #         server_window.destroy()
+            #         open_backup_interface(server_data)
+            #     else:
+            #         messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
             else:
                 messagebox.showerror("Error", "No se ha seleccionado ninguna base de datos.")
         except Exception as e:
@@ -192,9 +185,9 @@ def open_backup_interface(server_data=None):
 
     scheduled = False
 
-    def execute_backup(folder_path_label, server_data):
+    def execute_backup(folder, server_data):
         nonlocal scheduled
-        folder_path = folder_path_label.replace("Destino: ", "")
+        folder_path = folder.replace("Destino: ", "")
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
@@ -202,39 +195,22 @@ def open_backup_interface(server_data=None):
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
-            server_type_selected = server_data['server_type']
-            host = server_data['server_ip']
-            port = server_data['port']
-            user = server_data['username']
-            encrypted_password = server_data['encrypted_password']
-            if server_type_selected == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(encrypted_password, folder_path)
-                client = f.get_database_name(host, port, user, encrypted_password)
+            if  server_data[0] == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(server_data[3], folder_path, server_data[4])
                 messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
-                message = f"""
-                Estimados de {client},
-                Junto con saludar, le informamos que el respaldo de datos programado para el dia de hoy, {datetime.datetime.now().strftime('%Y-%m-%d')},
-                se ha realizado y completado con exito.
-
-                Saluda atentamente,
-                Methodo.
-                """
-                f.send_email(message)
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                f.backup_sql_server_database(encrypted_password, folder_path)
-                messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
+            # elif server_type_selected == "SQL Server (Windows Authentication)":
+            #     f.backup_sql_server_database(encrypted_password, folder_path)
+            #     messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            message = f"Error al ejecutar el respaldo: {e}"
-            f.send_email(message)
 
         if not scheduled:
             scheduled = True
             messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
             def schedule_backup():
-                schedule.every(5).minutes.do(execute_programed_backup, folder_path_label=rounded_label.cget("text"), server_data=server_data)
+                schedule.every(5).minutes.do(execute_programed_backup, folder_path, server_data=server_data)
 
             def run_scheduler():
                 while True:
@@ -300,26 +276,24 @@ def open_backup_interface(server_data=None):
     #         progress_bar.stop()  # Detiene la animación de la barra de progreso
     #         progress_window.destroy()  # Cierra la ventana de progreso
     
-    def execute_programed_backup():
+    def execute_programed_backup(folder_path, server_data):
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
-            server_type_selected = server_data['server_type']
-            encrypted_password = server_data['encrypted_password']
-            folder_path = rounded_label.cget("text").replace("Destino: ", "")
-            if server_type_selected == "MySQL Server (TCP/IP)":
-                f.backup_mysql_database(encrypted_password, folder_path)
-                message = f"Respaldo de MySQL completado. Carpeta: {folder_path}"
-                f.send_email(message)
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                f.backup_sql_server_database(encrypted_password, folder_path)
+            if  server_data[0] == "MySQL Server (TCP/IP)":
+                f.backup_mysql_database(server_data[3], folder_path, server_data[4])
+                messagebox.showinfo("Éxito", "Respaldo de MySQL completado.")
+            # elif server_type_selected == "SQL Server (Windows Authentication)":
+            #     f.backup_sql_server_database(encrypted_password, folder_path)
+            #     messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo programado: {e}")
-            message = f"Error al ejecutar el respaldo programado: {e}"
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            message = f"Error al ejecutar el respaldo: {e}"
             f.send_email(message)
+
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
@@ -338,32 +312,19 @@ def open_backup_interface(server_data=None):
 
     def show_backup_history():
         try:
-            # Directorio donde se guardan los respaldos   
-            backup_dir = rounded_label.cget("text").replace("Destino: ", "")  # Ruta de respaldos
-
-            # Verifica si el directorio existe
+            backup_dir = rounded_label.cget("text").replace("Destino: ", "")
             if not os.path.exists(backup_dir):
-                raise ValueError("El directorio de respaldos no existe.")
-
-            # lista de archivos 
+                raise ValueError("El directorio de respaldos no existe.") 
             backup_files = [
                 os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
-            ]
-
-            # Verifica si hay archivos de respaldo   
+            ] 
             if not backup_files:
                 raise ValueError("No hay respaldos disponibles.")
-
-            # Ordena los archivos por fecha de modificación
             backup_files.sort(key=os.path.getmtime, reverse=True)
-
-            # Crea una lista 
             backup_history = [
                 f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
                 for file in backup_files
             ]
-
-            # Mostrar el historial en un cuadro de mensaje
             messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
         except ValueError as ve:
             messagebox.showinfo("Historial de Respaldos", str(ve))

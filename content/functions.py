@@ -14,6 +14,7 @@ user = os.getenv("USER")
 bd = os.getenv("DATABASE")
 sender_email = os.getenv("EMAIL_ADRESS")
 sender_password = os.getenv("EMAIL_PASSWORD")
+backup_pass = os.getenv("BACKUP_PASSWORD")
 
 def encrypt(key, source, encode=True):
     key = SHA256.new(key).digest()
@@ -36,22 +37,31 @@ def decrypt(key, source, decode=True):
         raise ValueError("Invalid padding...")
     return data[:-padding]
 
-def bd_server_verify_mysql(IP, port, username, password):
+def bd_connect_mysql(host, port, password):
     try:
         decrypted_password = decrypt(KEY, password).decode("utf-8")
+        connect = [host, port, user, decrypted_password, bd]
         connection = mysql.connector.connect(
-            host=IP,
-            port=port,
-            user=username,
-            password=decrypted_password
+            host=connect[0],
+            port=connect[1],
+            user=connect[2],
+            password=connect[3],
+            database=connect[4]
         )
+        cursor = connection.cursor()
+        cursor.execute("SELECT nombre FROM conf_sistema")
+        result = cursor.fetchone()
         connection.close()
-        return True
+        if result:
+            return result[0]
+        else:
+            return "Nombre no encontrado en conf_sistema"
     except mysql.connector.Error as err:
-        print(f"Error during MySQL server verification: {err}")
-        return False
+        return f"Error en Base de Datos: {err}"
+    except Exception as e:
+        return f"Un error inesperado a ocurrido: {e}"
 
-def bd_server_verify_sql_server(server, username, password):
+# def bd_server_verify_sql_server(server, username, password):
     try:
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         connection_string = f"DRIVER={{SQL Server}};SERVER={server};UID={username};PWD={decrypted_password}"
@@ -62,11 +72,11 @@ def bd_server_verify_sql_server(server, username, password):
         print(f"Error during SQL Server server verification: {err}")
         return False
     
-def backup_mysql_database(password, backup_dir):
+def backup_mysql_database(password, backup_dir, client):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
-    backup_file_name = f"prueba_backup_{timestamp}.txt"
-    rar_file_name = f"prueba_backup_{timestamp}.rar"
-    decrypted_password = decrypt(KEY, password).decode("utf-8")  
+    decrypted_password = decrypt(KEY, password).decode("utf-8")
+    backup_file_name = f"{client}_backup_{timestamp}.txt"
+    rar_file_name = f"{client}_backup_{timestamp}.rar"
     
     mysql_bin_path = "C:\\mysql\\bin"
     rar_path = "C:\\WinRAR"
@@ -83,7 +93,7 @@ def backup_mysql_database(password, backup_dir):
         subprocess.run(move_command, shell=True, check=True)
 
         os.chdir(rar_path)     
-        rar_process = subprocess.run(comprimir_command, shell=True, input=decrypted_password, capture_output=True, text=True)
+        rar_process = subprocess.run(comprimir_command, shell=True, input=backup_pass, capture_output=True, text=True)
         if rar_process.returncode != 0:
             print(f"RAR Output: {rar_process.stdout}")
             print(f"RAR Error: {rar_process.stderr}")
@@ -91,12 +101,21 @@ def backup_mysql_database(password, backup_dir):
 
         subprocess.run(delete_txt, shell=True, check=True)
         subprocess.run(move_command2, shell=True, check=True)
+        message = f"""
+                Estimados de {client},
+                Junto con saludar, le informamos que el respaldo de datos programado para el dia de hoy, {timestamp},
+                se ha realizado y completado con exito.
+
+                Saluda atentamente,
+                Methodo.
+                """
+        send_email(message)
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred while backing up MySQL database: {e}")
+        send_email(f"Error ocurrido al respaldar datos: {e}")
     except OSError as e:
-        print(f"Error changing directory: {e}")
+        send_email(f"Error ocurrido al respaldar datos: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        send_email(f"Error inesperado: {e}")
     
 def backup_sql_server_database(server, user, password, dbname, backup_dir):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
@@ -131,30 +150,4 @@ def send_email(message):
             server.sendmail(sender_email, receiver_email, email_message)
             server.quit()
     return True
-
-def get_database_name(host, port, user, password):
-    try:
-        decrypted_password = decrypt(KEY, password).decode("utf-8")
-        connect = [host, port, user, decrypted_password, bd]
-        connection = mysql.connector.connect(
-            host=connect[0],
-            port=connect[1],
-            user=connect[2],
-            password=connect[3],
-            database=connect[4]
-        )
-        cursor = connection.cursor()
-        cursor.execute("SELECT nombre FROM conf_sistema")
-        result = cursor.fetchone()
-        connection.close()
-        if result:
-            return result[0]
-        else:
-            return "Nombre no encontrado en conf_sistema"
-    except mysql.connector.Error as err:
-        print(f"Error during database operation: {err}")
-        return f"Database error: {err}"
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return f"An unexpected error occurred: {e}"
 
