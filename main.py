@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 import threading
 from content.views import create_login_interface, schedule_backup
+=======
+from views import create_login_interface
+>>>>>>> origin/dev
 
 if __name__ == "__main__":
     try:

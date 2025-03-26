@@ -1,6 +1,5 @@
-views/__pycache__/views.cpython-311.pyc
-content/__pycache__/encrypt.cpython-311.pyc
-content/__pycache__/views.cpython-311.pyc
 __pycache__/
 .venv/
 .vscode/launch.json
+.env
+output/
