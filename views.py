@@ -1,15 +1,3 @@
-<<<<<<< HEAD:content/views.py
-import customtkinter
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from tkcalendar import DateEntry
-import content.functions as f
-from tkinter import simpledialog
-from tkinter import ttk
-import os    
-import datetime
-import time
-=======
 import os    
 import datetime
 import time
@@ -19,7 +7,6 @@ import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
 
->>>>>>> origin/dev:views.py
 customtkinter.set_appearance_mode("dark") 
 
 def create_login_interface():
@@ -30,23 +17,8 @@ def create_login_interface():
     frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-<<<<<<< HEAD:content/views.py
-
-    
-
-    
-
-
-    #esta wea si cambia la apariencia de oscuro a claro
-
     switch = customtkinter.StringVar(value="dark")
 
-
-
-=======
-    switch = customtkinter.StringVar(value="dark")
-
->>>>>>> origin/dev:views.py
     def switch_mode():
         if switch.get() == "dark":
             customtkinter.set_appearance_mode("light")
@@ -59,13 +31,6 @@ def create_login_interface():
     
     button = customtkinter.CTkSwitch(frame, command=switch_mode, text="oscuro")
     button.pack(pady=10, padx=10, anchor="ne")
-<<<<<<< HEAD:content/views.py
-        
-
-    
-
-=======
->>>>>>> origin/dev:views.py
 
     # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
@@ -148,28 +113,13 @@ def create_server_interface():
 
         
             if server_type_selected == "MySQL Server (TCP/IP)":
-<<<<<<< HEAD:content/views.py
-                if f.bd_server_verify_mysql(server_ip, port, username, encrypted_password):
-                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos MySQL Server.")
-=======
                 client, connection_success = bd_connect_mysql(host, port, encrypted_password)
                 if connection_success :
                     server_data = [server_type_selected, host, port, encrypted_password, client]
                     messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos MySQL. Cliente: {client}")
->>>>>>> origin/dev:views.py
                     server_window.destroy()
                     open_backup_interface(server_data)
                 else:
-<<<<<<< HEAD:content/views.py
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos MySQL Server.")
-            elif server_type_selected == "SQL Server (Windows Authentication)":
-                if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
-                    messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-                    server_window.destroy()
-                    open_selection_interface(server_data)
-                else:
-                    messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
-=======
                     messagebox.showerror("Error", f"Error en la conexión a la base de datos MySQL: {client}")
             # elif server_type_selected == "SQL Server (Windows Authentication)":
             #     if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
@@ -178,7 +128,6 @@ def create_server_interface():
             #         open_backup_interface(server_data)
             #     else:
             #         messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
->>>>>>> origin/dev:views.py
             else:
                 messagebox.showerror("Error", "No se ha seleccionado ninguna base de datos.")
         except Exception as e:
@@ -194,68 +143,7 @@ def create_server_interface():
     
 # wea pa comprimir con contraseña
 
-<<<<<<< HEAD:content/views.py
-def password_compress(folder_path_label, server_data):
-    folder_path = folder_path_label.replace("Destino: ", "")
-    if not folder_path:
-        messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
-        return
-
-    try:
-        if server_data is None:
-            messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-            return
-        
-        server_type_selected = server_data['server_type']
-        encrypted_password = server_data['encrypted_password']
-
-        # Solicitar contraseña para el archivo comprimido
-        rar_password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo comprimido:", show='*')
-        if not rar_password:
-            messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
-            return
-
-        progress_window = customtkinter.CTkToplevel()
-        progress_window.title("Progreso")
-        progress_window.geometry("400x150")
-
-        # Centrar la ventana de progreso en la pantalla
-        parent_x = progress_window.winfo_screenwidth() // 2
-        parent_y = progress_window.winfo_screenheight() // 2
-        progress_window.geometry(f"+{parent_x - 200}+{parent_y - 75}")
-
-        progress_label = customtkinter.CTkLabel(progress_window, text="Realizando respaldo, por favor espere...")
-        progress_label.pack(pady=10)
-
-        # Barra de progreso
-        progress_bar = ttk.Progressbar(progress_window, orient="horizontal", mode="indeterminate", length=300)
-        progress_bar.pack(pady=10)
-        progress_bar.start()  # Inicia la animación de la barra de progreso
-        
-        progress_window.update()  # Actualiza la ventana para mostrar los cambios
-
-
-        # Realizar el respaldo según el tipo de servidor
-        if server_type_selected == "MySQL Server (TCP/IP)":
-            f.backup_mysql_database(encrypted_password, folder_path, rar_password)
-            messagebox.showinfo("Éxito", "Respaldo de MySQL completado y comprimido con contraseña.")
-        elif server_type_selected == "SQL Server (Windows Authentication)":
-            f.backup_sql_server_database(encrypted_password, folder_path, rar_password)
-            messagebox.showinfo("Éxito", "Respaldo de SQL Server completado y comprimido con contraseña.")
-        else:
-            messagebox.showerror("Error", "Tipo de servidor no soportado.")
-            return
-    except Exception as e:
-        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-    finally:
-        progress_bar.stop()  # Detiene la animación de la barra de progreso
-        progress_window.destroy()  # Cierra la ventana de progreso
-
-def open_selection_interface(server_data=None):
-    """Abre la interfaz de selección de documentos."""
-=======
 def open_backup_interface(server_data=None):
->>>>>>> origin/dev:views.py
     root = customtkinter.CTk()
     root.title("Respaldo local")
     root.geometry("600x400")
@@ -293,56 +181,6 @@ def open_backup_interface(server_data=None):
     rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=40)
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
-<<<<<<< HEAD:content/views.py
-    # Icono de calendario para seleccionar fecha y hora
-    calendar_icon = customtkinter.CTkButton(date_frame, text="📅", width=30, command=lambda: open_calendar(root), fg_color="green")
-    calendar_icon.pack(side="right", pady=10, padx=10)
-
-    # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: password_compress(rounded_label.cget("text"), server_data), fg_color="green")
-    execute_button.pack(pady=10)
-
-     
-
-    # wea pa mostrar el historial de respaldos  
-    def show_backup_history():
-        try:
-            # Directorio donde se guardan los respaldos
-            
-            backup_dir = "C:\\respaldo"  # Ruta de respaldos
-
-            # Verifica si el directorio existe
-            if not os.path.exists(backup_dir):
-                raise ValueError("El directorio de respaldos no existe.")
-
-            # lista de archivos 
-            backup_files = [
-                os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
-            ]
-
-            # Verifica si hay archivos de respaldo
-            
-            if not backup_files:
-                raise ValueError("No hay respaldos disponibles.")
-
-            # Ordena los archivos por fecha de modificación
-            backup_files.sort(key=os.path.getmtime, reverse=True)
-
-            # Crea una lista 
-            backup_history = [
-                f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
-                for file in backup_files
-            ]
-
-            # Mostrar el historial en un cuadro de mensaje
-            messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
-        except ValueError as ve:
-            messagebox.showinfo("Historial de Respaldos", str(ve))
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
-
-            
-=======
     # Botón para ejecutar
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
@@ -428,7 +266,6 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             message = f"Error al ejecutar el respaldo: {e}"
             send_email(message)
->>>>>>> origin/dev:views.py
 
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
@@ -466,28 +303,8 @@ def open_backup_interface(server_data=None):
         except Exception as e:
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
-<<<<<<< HEAD:content/views.py
-    # Función para cambiar el color al hacer hover
-    def on_enter(event):
-        advanced_settings_link.configure(text_color="deep sky blue")
-
-    def on_leave(event):
-        advanced_settings_link.configure(text_color="green")
-
-# hovers de la confi :p
-
-    advanced_settings_link.bind("<Enter>", on_enter)
-    advanced_settings_link.bind("<Leave>", on_leave)
-
-
     def on_closing():
         root.destroy()  # Cierra la ventana actual
-        create_login_interface()  # Vuelve a abrir la ventana de inicio de sesión
-
-=======
-    def on_closing():
-        root.destroy()  # Cierra la ventana actual
->>>>>>> origin/dev:views.py
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
     
@@ -495,87 +312,7 @@ def open_backup_interface(server_data=None):
     
 # Función pa programar repaldo 
 
-<<<<<<< HEAD:content/views.py
-scheduled_time = None  # Global variable to store the scheduled time
-
-def schedule_backup():
-    global scheduled_time
-    while True:
-        if scheduled_time:
-            # Obtener la hora actual
-            current_time = datetime.datetime.now().strftime("%H:%M")
-            if current_time == scheduled_time:
-                try:
-                    # Llamar a la función de respaldo automático
-                    folder_path = "C:\\respaldo"  # Cambia esto a tu ruta real
-                    server_data = {
-                        "server_type": "MySQL Server (TCP/IP)",
-                        "encrypted_password": f.encrypt(f.KEY, b"Freya-100MTH")  # Cambia esto a tu contraseña
-                    }
-                    password_compress(f"Destino: {folder_path}", server_data)  # Llamar correctamente
-                except Exception as e:
-                    print(f"Error al realizar el respaldo automático: {e}")
-                finally:
-                    # Esperar un minuto para evitar múltiples ejecuciones en el mismo minuto
-                    time.sleep(60)
-        time.sleep(1)  # Verificar cada segundo
-
-def open_calendar(parent_window):
-    global scheduled_time
-    time_window = customtkinter.CTkToplevel(parent_window)
-    time_window.title("Programar Respaldo Automático")
-    time_window.geometry("300x250")
-    time_window.transient(parent_window)
-
-    # Etiqueta para la fecha actual
-    current_date_label = customtkinter.CTkLabel(time_window, text=f"Fecha actual: {datetime.datetime.now().strftime('%Y-%m-%d')}")
-    current_date_label.pack(pady=10)
-
-    # Etiqueta para la hora
-    hour_label = customtkinter.CTkLabel(time_window, text="Seleccione hora (HH:MM):")
-    hour_label.pack(pady=10)
-
-    # Frame para los cuadros de selección de hora y minutos
-    time_frame = customtkinter.CTkFrame(time_window)
-    time_frame.pack(pady=10)
-
-    # Spinbox para la hora
-    hour_spinbox = tk.Spinbox(time_frame, from_=0, to=23, width=3, format="%02.0f")
-    hour_spinbox.pack(side="left", padx=5)
-
-    # Separador entre hora y minutos
-    separator_label = customtkinter.CTkLabel(time_frame, text=":")
-    separator_label.pack(side="left", padx=5)
-
-    # Spinbox para los minutos
-    minute_spinbox = tk.Spinbox(time_frame, from_=0, to=59, width=3, format="%02.0f")
-    minute_spinbox.pack(side="left", padx=5)
-
-    # Botón para guardar la hora programada
-    def save_time():
-        global scheduled_time
-        selected_time = f"{hour_spinbox.get()}:{minute_spinbox.get()}"
-        try:
-            # Validar el formato de la hora
-            datetime.datetime.strptime(selected_time, "%H:%M")
-            scheduled_time = selected_time
-            messagebox.showinfo("Éxito", f"Respaldo programado para hoy a las {scheduled_time}.")
-            time_window.destroy()
-        except ValueError:
-            messagebox.showerror("Error", "Formato de hora inválido. Use HH:MM.")
-            
-
-    save_button = customtkinter.CTkButton(time_window, text="Aplicar", command=save_time, fg_color="green")
-    save_button.pack(pady=20)
-    
-    
-
-    #time_window.protocol("WM_DELETE_WINDOW", lambda: time_window.destroy())
-
-def open_backup_interface(parent_window):
-=======
 def open_advance_options(parent_window):
->>>>>>> origin/dev:views.py
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     root.geometry("500x600")
@@ -602,11 +339,7 @@ def open_advance_options(parent_window):
     transaction_checkbox.pack(pady=5, padx=30, anchor="w")
     
     # Botón de Guardar y Cerrar
-<<<<<<< HEAD:content/views.py
-    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: close_and_return(root, parent_window), fg_color="green")
-=======
     save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: on_closing())
->>>>>>> origin/dev:views.py
     save_button.pack(pady=20, padx=10)
 
     # Segunda sección: Opciones de Respaldo
@@ -633,14 +366,5 @@ def open_advance_options(parent_window):
         parent_window.deiconify()  # Rehabilita la ventana padre
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
-<<<<<<< HEAD:content/views.py
-
-    
-
-    # Ocultar la ventana padre mientras la ventana de configuración avanzada está abierta
-    parent_window.withdraw()
-
-=======
->>>>>>> origin/dev:views.py
     root.mainloop()
 
