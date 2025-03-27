@@ -53,7 +53,7 @@ def bd_connect_mysql(host, port, password):
             database=connect[4]
         )
         cursor = connection.cursor()
-        cursor.execute("SELECT nombre FROM conf_sistema")
+        cursor.execute("SELECT nombre_cliente FROM conf_sistema")
         result = cursor.fetchone()
         connection.close()
         if result:
@@ -122,9 +122,8 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
         if update_callback:
             update_callback(100, "Respaldo completado.")
         message = f"""
-                Estimados,
-                Informamos que el respaldo de datos programado para el dia de hoy, {timestamp_email}, 
-                se ha realizado y completado con exito.
+                Estimados, informamos que el respaldo de datos programado 
+                para el dia de hoy, {timestamp_email}, se ha realizado y completado con exito.
 
                 Saluda atentamente,
                 Mesa de ayuda Methodo.
