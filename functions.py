@@ -1,12 +1,12 @@
 import os
 import dotenv
+import socket
 import subprocess
 import datetime
 import base64
 import mysql.connector
 import pyodbc
 import smtplib
-import mysql.connector.locales.eng.client_error
 from Crypto.Cipher import AES
 from Crypto import Random
 from Crypto.Hash import SHA256
@@ -62,8 +62,6 @@ def bd_connect_mysql(host, port, password):
             return "Nombre no encontrado en conf_sistema", False
     except mysql.connector.Error as err:
         return f"Error en Base de Datos: {err}", False
-    except pyodbc.Error as err:
-        return f"Error en Base de Datos: {err}", False
     except Exception as e:
         return f"Un error inesperado a ocurrido: {e}", False
 
@@ -80,11 +78,13 @@ def bd_connect_mysql(host, port, password):
     
 def backup_mysql_database(password, backup_dir, client, update_callback=None):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
+    timestamp_email = timestamp[:4] + "-" + timestamp[4:6] + "-" + timestamp[6:8] + " " + timestamp[8:10] + ":" + timestamp[10:12]
     decrypted_password = decrypt(KEY, password).decode("utf-8")
     if " " in client:
         client = client.replace(" ", "_")
-    backup_file_name = f"{client}_backup_{timestamp}.txt"
-    rar_file_name = f"{client}_backup_{timestamp}.rar"
+    device = socket.gethostname()
+    backup_file_name = f"{client}_{device}_backup_{timestamp}.txt"
+    rar_file_name = f"{client}_{device}_backup_{timestamp}.rar"
     
     mysql_bin_path = "C:\\mysql\\bin"
     rar_path = "C:\\WinRAR"
@@ -122,20 +122,20 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
         if update_callback:
             update_callback(100, "Respaldo completado.")
         message = f"""
-                Estimados de {client},
-                Junto con saludar, le informamos que el respaldo de datos programado para el dia de hoy, {timestamp},
+                Estimados,
+                Informamos que el respaldo de datos programado para el dia de hoy, {timestamp_email}, 
                 se ha realizado y completado con exito.
 
                 Saluda atentamente,
-                Methodo.
+                Mesa de ayuda Methodo.
                 """
-        send_email(message)
+        send_email(client, message)
     except subprocess.CalledProcessError as e:
-        send_email(f"Error ocurrido al respaldar datos: {e}")
+        send_email(client, f"Error ocurrido al respaldar datos: {e}")
     except OSError as e:
-        send_email(f"Error ocurrido al respaldar datos: {e}")
+        send_email(client, f"Error ocurrido al respaldar datos: {e}")
     except Exception as e:
-        send_email(f"Error inesperado: {e}")
+        send_email(client, f"Error inesperado: {e}")
     
 # # def backup_sql_server_database(server, user, password, dbname, backup_dir):
 #     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
@@ -149,21 +149,21 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
 #     except Exception as e:
 #         print(f"An unexpected error occurred: {e}")
 
-def send_email(message):
+def send_email(client, message):
     receiver_email = "jose.jimenez@methodo.cl"
     try:
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.ehlo()
             server.starttls()
             server.login(EMAIL_ADRESS, EMAIL_PASSWORD)
-            subject = "Respaldo completado con exito"
+            subject = f"Respaldo completado con exito. Cliente: {client}"
             if "Error" in message:
-                subject = "Respaldo interrumpido por error"
+                subject = f"Respaldo interrumpido por error. Cliente: {client}"
             email_message = f"Subject: {subject}\n\n{message}"
             server.sendmail(EMAIL_ADRESS, receiver_email, email_message)
             server.quit()
     except smtplib.SMTPAuthenticationError as e:
-        print(f"Error occurred while authenticating: {e}")
+        print(f"Error occurred while sending email: {e}")
     except Exception as e:
         print(f"Error occurred while sending email: {e}")
     return True
