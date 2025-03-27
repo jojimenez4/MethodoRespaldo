@@ -9,7 +9,11 @@ from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_databa
 
 customtkinter.set_appearance_mode("dark") 
 
+# Add a global flag to track if the app is running
+app_running = True
+
 def create_login_interface():
+    global app_running
     login_window = customtkinter.CTk()
     login_window.title("Login")
     login_window.geometry("400x300")
@@ -63,9 +67,16 @@ def create_login_interface():
 
     password_entry.bind("<Return>", lambda event: verify_login())
 
+    def on_closing():
+        global app_running
+        app_running = False
+        login_window.destroy()  # Cierra la ventana actual
+
+    login_window.protocol("WM_DELETE_WINDOW", on_closing)
     login_window.mainloop()
 
 def create_server_interface():
+    global app_running
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor MySQL")
     server_window.geometry("800x350")
@@ -139,11 +150,18 @@ def create_server_interface():
 
     password_entry.bind("<Return>", lambda event: verify_server())
 
+    def on_closing():
+        global app_running
+        app_running = False
+        server_window.destroy()  # Cierra la ventana actual
+
+    server_window.protocol("WM_DELETE_WINDOW", on_closing)
     server_window.mainloop()
     
 # wea pa comprimir con contraseña
 
 def open_backup_interface(server_data=None):
+    global app_running
     root = customtkinter.CTk()
     root.title("Respaldo local")
     root.geometry("600x400")
@@ -188,6 +206,7 @@ def open_backup_interface(server_data=None):
     scheduled = False
 
     def execute_backup(folder, server_data):
+        global app_running
         nonlocal scheduled
         folder_path = folder.replace("Destino: ", "")
         if not folder_path:
@@ -209,9 +228,10 @@ def open_backup_interface(server_data=None):
         progress_label.pack(pady=5)
 
         def update_progress(value, text):
-            progressbar['value'] = value
-            progress_label.configure(text=text)
-            progress_window.update_idletasks()
+            if app_running:  # Check if the app is still running
+                progressbar['value'] = value
+                progress_label.configure(text=text)
+                progress_window.update_idletasks()
 
         try:
             if server_data is None:
@@ -241,8 +261,11 @@ def open_backup_interface(server_data=None):
         if not scheduled:
             scheduled = True
             def schedule_backup():
-                schedule.every(5).minutes.do(execute_programed_backup, folder_path, server_data=server_data)
-                messagebox.showinfo("Info", "Respaldo automático programado cada 5 minutos.")
+                interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
+                schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
+
+                messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
+            
             def run_scheduler():
                 while True:
                     schedule.run_pending()
@@ -255,11 +278,8 @@ def open_backup_interface(server_data=None):
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
-            if  server_data[0] == "MySQL Server (TCP/IP)":
+            if server_data[0] == "MySQL Server (TCP/IP)":
                 backup_mysql_database(server_data[3], folder_path, server_data[4])
-            # elif server_type_selected == "SQL Server (Windows Authentication)":
-            #     f.backup_sql_server_database(encrypted_password, folder_path)
-            #     messagebox.showinfo("Éxito", "Respaldo de SQL Server completado.")
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
@@ -270,7 +290,7 @@ def open_backup_interface(server_data=None):
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
-    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root))
+    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root, rounded_label))
 
     # Función para cambiar el color al hacer hover
     def on_enter(event):
@@ -304,6 +324,8 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
     def on_closing():
+        global app_running
+        app_running = False
         root.destroy()  # Cierra la ventana actual
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
@@ -312,7 +334,8 @@ def open_backup_interface(server_data=None):
     
 # Función pa programar repaldo 
 
-def open_advance_options(parent_window):
+def open_advance_options(parent_window, rounded_label):
+    global app_running
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     root.geometry("500x600")
@@ -320,51 +343,117 @@ def open_advance_options(parent_window):
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=20, padx=60, fill="both", expand=True)
 
-    # Primera sección: Opciones de archivo SQL
-    sql_file_options_label = customtkinter.CTkLabel(frame, text="Opciones de archivo SQL", font=("Helvetica", 16), anchor="w", width=40)
-    sql_file_options_label.pack(pady=10, padx=10, anchor="w")
+     # Lista para almacenar las tareas adicionales
+    additional_tasks = []
 
-    # Checkbox para "Estructura"
-    structure_var = customtkinter.StringVar()
-    structure_checkbox = customtkinter.CTkCheckBox(frame, text="Estructura", variable=structure_var)
-    structure_checkbox.pack(pady=5, padx=10, anchor="w")
+    def add_task():
+        if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
+            messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
+            root.destroy()  # Cierra la ventana actual en caso de error
+            
 
-    # Sub-opciones de SQL (ejemplo)
-    drop_table_var = customtkinter.StringVar()
-    drop_table_checkbox = customtkinter.CTkCheckBox(frame, text="Agregar declaración DROP TABLE --add-drop-table", variable=drop_table_var)
-    drop_table_checkbox.pack(pady=5, padx=30, anchor="w")
+        # Crear un nuevo frame para la tarea adicional
+        task_frame = customtkinter.CTkFrame(frame)
+        task_frame.pack(pady=5, padx=10, fill="x")
 
-    transaction_var = customtkinter.StringVar()
-    transaction_checkbox = customtkinter.CTkCheckBox(frame, text="Encerrar exportación en una transacción --single-transaction", variable=transaction_var)
-    transaction_checkbox.pack(pady=5, padx=30, anchor="w")
+        # Campo para horas
+        task_hour_label = customtkinter.CTkLabel(task_frame, text="Hora:")
+        task_hour_label.pack(side="left", padx=(10, 5))
+        task_hour_combobox = customtkinter.CTkComboBox(task_frame, values=[str(h).zfill(2) for h in range(24)], width=80)
+        task_hour_combobox.set("00")
+        task_hour_combobox.pack(side="left", padx=(0, 10))
+
+        # Campo para minutos
+        task_minute_label = customtkinter.CTkLabel(task_frame, text="Minuto:")
+        task_minute_label.pack(side="left", padx=(10, 5))
+        task_minute_combobox = customtkinter.CTkComboBox(task_frame, values=[str(m).zfill(2) for m in range(60)], width=80)
+        task_minute_combobox.set("00")
+        task_minute_combobox.pack(side="left", padx=(0, 10))
+
+        # Botón para eliminar la tarea
+        remove_button = customtkinter.CTkButton(task_frame, text="-", width=30, fg_color="red", command=lambda: remove_task(task_frame))
+        remove_button.pack(side="left", padx=(10, 5))
+
+        # Agregar la tarea a la lista
+        additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
+
+    def remove_task(task_frame):
+        for task in additional_tasks:
+            if task[0] == task_frame:
+                additional_tasks.remove(task)
+                task_frame.destroy()
+                break
+
+    # Botón para agregar tareas adicionales
+    add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
+    add_task_button.pack(pady=10, padx=10, anchor="ne")
+
+    time_label = customtkinter.CTkLabel(frame, text="Configurar tiempo de respaldo", font=("Helvetica", 16))
+    time_label.pack(pady=10)
+
+    # Frame para las entradas de horas y minutos
+    time_frame = customtkinter.CTkFrame(frame)
+    time_frame.pack(pady=10, padx=10, fill="x")
+
+    # Campo para horas
+    hour_label = customtkinter.CTkLabel(time_frame, text="Hora:")
+    hour_label.pack(side="left", padx=(10, 5))
+    hour_combobox = customtkinter.CTkComboBox(time_frame, values=[str(h).zfill(2) for h in range(24)], width=80)
+    hour_combobox.set("00")  # Valor predeterminado
+    hour_combobox.pack(side="left", padx=(0, 10))
+
+   
+    minute_label = customtkinter.CTkLabel(time_frame, text="Minuto:")
+    minute_label.pack(side="left", padx=(10, 5))
+    minute_combobox = customtkinter.CTkComboBox(time_frame, values=[str(m).zfill(2) for m in range(60)], width=80)
+    minute_combobox.set("00")  # Valor predeterminado
+    minute_combobox.pack(side="left", padx=(0, 10))
+
     
-    # Botón de Guardar y Cerrar
-    save_button = customtkinter.CTkButton(frame, text="Guardar y Cerrar", command=lambda: on_closing())
-    save_button.pack(pady=20, padx=10)
+    minute_combobox.set("00")  # Valor predeterminado
+    minute_combobox.pack(side="left", padx=(0, 10))
 
-    # Segunda sección: Opciones de Respaldo
-    backup_options_label = customtkinter.CTkLabel(frame, text="Opciones de Respaldo", font=("Helvetica", 16), anchor="w", width=40)
-    backup_options_label.pack(pady=10, padx=10, anchor="w")
+   
 
-    # Checkbox para "Colocar el respaldo en subcarpeta"
-    subfolder_var = customtkinter.StringVar()
-    subfolder_checkbox = customtkinter.CTkCheckBox(frame, text="Colocar el respaldo para cada base de datos en su propia subcarpeta", variable=subfolder_var)
-    subfolder_checkbox.pack(pady=5, padx=10, anchor="w")
+    def save_advanced_settings():
+        try:
+            # Verificar si se seleccionó una carpeta de destino
+            folder_path = rounded_label.cget("text").replace("Destino: ", "")
+            if not folder_path:
+                raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
 
-    # Checkbox para estructura y datos
-    structure_backup_var = customtkinter.StringVar()
-    structure_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Estructura", variable=structure_backup_var)
-    structure_backup_checkbox.pack(pady=5, padx=30, anchor="w")
+            # Guardar la configuración de la tarea predeterminada
+            hours = int(hour_combobox.get())
+            minutes = int(minute_combobox.get())
+            if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+                raise ValueError("Horas o minutos inválidos.")
+            global backup_hours, backup_minutes
+            backup_hours = hours
+            backup_minutes = minutes
 
-    data_backup_var = customtkinter.StringVar()
-    data_backup_checkbox = customtkinter.CTkCheckBox(frame, text="Datos", variable=data_backup_var)
-    data_backup_checkbox.pack(pady=5, padx=30, anchor="w")
+            # Guardar las tareas adicionales
+            for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
+                task_hours = int(task_hour_combobox.get())
+                task_minutes = int(task_minute_combobox.get())
+                if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
+                    raise ValueError("Horas o minutos inválidos en una tarea adicional.")
+                # Aquí puedes guardar las tareas adicionales en una lista o archivo según sea necesario
+
+            messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
+            root.destroy()  # Cierra la ventana actual
+        except ValueError as e:
+            messagebox.showerror("Error", f"Error en la configuración: {e}")
+            root.destroy()  # Cierra la ventana actual en caso de error
+
+    save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings)
+    save_button.pack(pady=20)
 
     # Detectar el cierre de la ventana
     def on_closing():
+        global app_running
+        app_running = False
         root.destroy()  # Cierra la ventana actual
         parent_window.deiconify()  # Rehabilita la ventana padre
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
-

@@ -150,7 +150,7 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
 #         print(f"An unexpected error occurred: {e}")
 
 def send_email(message):
-    receiver_email = "jose.jimenez@methodo.cl"
+    receiver_email = "sebastian.mellado@methodo.cl"
     try:
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.ehlo()

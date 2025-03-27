@@ -1,6 +1,0 @@
-CREATE TABLE prueba (
-    id INTEGER PRIMARY KEY,
-    descripcion TEXT
-);
-
-
