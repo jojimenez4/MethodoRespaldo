@@ -31,7 +31,10 @@ def create_login_interface():
             button.configure(text="claro")
             switch.set("light")
         else:
-            customtkinter.set_appearance_mode("dark")
+            def initialize_appearance():
+                customtkinter.set_appearance_mode("dark")
+            
+            initialize_appearance()
             button.configure(text="oscuro")
             switch.set("dark")
     
@@ -123,8 +126,6 @@ def create_server_interface():
             encrypted_password = encrypt(KEY, password)
             server_type_selected = server_type.get()
             client = ""
-
-        
             if server_type_selected == "MySQL Server (TCP/IP)":
                 client, connection_success = bd_connect_mysql(host, port, encrypted_password)
                 if connection_success :
@@ -157,7 +158,7 @@ def create_server_interface():
         app_running = False
         server_window.destroy()  # Cierra la ventana actual
 
-    server_window.protocol("WM_DELETE_WINDOW", on_closing)
+# Function to handle compression with password
     server_window.mainloop()
     
 # wea pa comprimir con contraseña
@@ -205,11 +206,9 @@ def open_backup_interface(server_data=None):
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
 
-
-
     scheduled = None
-  
-
+    backup_hours = 0
+    backup_minutes = 0  
     def execute_backup(folder, server_data):
   
         global app_running
@@ -234,11 +233,10 @@ def open_backup_interface(server_data=None):
         progress_label.pack(pady=5)
 
         def update_progress(value, text):
-            if app_running:  # Check if the app is still running
+            if app_running and progress_window.winfo_exists():  # Check if the app is running and the window exists
                 progressbar['value'] = value
                 progress_label.configure(text=text)
                 progress_window.update_idletasks()  # Ensure UI updates are reflected
-
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
@@ -262,14 +260,10 @@ def open_backup_interface(server_data=None):
         except Exception as e:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             progress_window.destroy()
-
-
-            scheduled = True
             
             def schedule_backup():
                 interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-                schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
-
+                schedule.every(interval_seconds).seconds.do(lambda: execute_programed_backup(folder_path, server_data))
                 messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
             
             def run_scheduler():
@@ -314,8 +308,8 @@ def open_backup_interface(server_data=None):
             if not os.path.exists(backup_dir):
                 raise ValueError("El directorio de respaldos no existe.") 
             backup_files = [
-                os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
-            ] 
+                entry.path for entry in os.scandir(backup_dir) if entry.is_file() and entry.name.endswith(".rar")
+            ]
             if not backup_files:
                 raise ValueError("No hay respaldos disponibles.")
             backup_files.sort(key=os.path.getmtime, reverse=True)
@@ -336,16 +330,12 @@ def open_backup_interface(server_data=None):
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
     
-    
-    
-# Función pa programar repaldo 
-
 scheduled_backup_thread = None
 scheduled = False  # Variable para saber si el respaldo está programado
 
-
 def open_advance_options(parent_window, rounded_label):
-    global scheduled, scheduled_backup_thread  # aki se llaman las variables globales
+    global scheduled, scheduled_backup_thread, stop_event  # Declare global variables
+    stop_event = threading.Event()  # Event to signal the thread to stop
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     root.geometry("500x600")
@@ -356,11 +346,9 @@ def open_advance_options(parent_window, rounded_label):
      # Lista para almacenar las tareas adicionales
     additional_tasks = []
 
-
     def add_task():
-        if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
+        if len(additional_tasks) >= 3:  # Máximo 3 tareas adicionales
             messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
-            return
 
         # Crear un nuevo frame para la tarea adicional
         task_frame = customtkinter.CTkFrame(frame)
@@ -395,6 +383,8 @@ def open_advance_options(parent_window, rounded_label):
                 additional_tasks.remove(task)
                 task_frame.destroy()
                 break
+        else:
+            messagebox.showerror("Error", "La tarea no se encontró en la lista.")
 
     # Botón para agregar tareas adicionales
     add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
@@ -425,32 +415,24 @@ def open_advance_options(parent_window, rounded_label):
     hour_combobox.configure(justify="center")
     minute_combobox.configure(justify="center")
 
-
-
-    
-
     def save_advanced_settings():
-
         global scheduled, scheduled_backup_thread  # se llama en el guardao global scheduled pa detener el respaldo automatico y configurar otraeh
-
         try:
             # Verificar si se seleccionó una carpeta de destino
             folder_path = rounded_label.cget("text").replace("Destino: ", "")
             if not folder_path:
                 raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
-            
             if scheduled:
                 confirm = messagebox.askyesno("Confirmación", "¿Deseas detener el respaldo automático actual y configurar uno nuevo?")
                 if confirm:
                     # Detener el respaldo programado actual
-                    if scheduled_backup_thread is not None:
-                        scheduled_backup_thread.join()  # Esperar a que el hilo se termine si está corriendo
+                    if scheduled_backup_thread.is_alive():
+                        stop_event.set()  # Signal the thread to stop
+                        scheduled_backup_thread.join()  # Wait for the thread to finish
                     schedule.clear()  # Limpiar las tareas programadas
                     scheduled = False  # Marcar como no programado
             
-
             # Guardar la configuración de la tarea predeterminada
-            
             hours = int(hour_combobox.get())
             minutes = int(minute_combobox.get())
             if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
@@ -458,7 +440,6 @@ def open_advance_options(parent_window, rounded_label):
             global backup_hours, backup_minutes
             backup_hours = hours
             backup_minutes = minutes
-
 
             # Guardar las tareas adicionales
             for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
@@ -469,10 +450,9 @@ def open_advance_options(parent_window, rounded_label):
                 # Aquí puedes guardar las tareas adicionales en una lista o archivo según sea necesario
 
             messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
-            root.destroy()  # Cierra la ventana actual
-
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
+            # Mantener la ventana abierta para permitir correcciones
 
             root.destroy()  # Cierra la ventana actual en caso de error
 
@@ -485,7 +465,6 @@ def open_advance_options(parent_window, rounded_label):
         app_running = False
         root.destroy()  # Cierra la ventana actual
         parent_window.deiconify()  # Rehabilita la ventana padre
-
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
