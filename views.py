@@ -207,8 +207,6 @@ def open_backup_interface(server_data=None):
     execute_button.pack(pady=10)
 
     scheduled = None
-    backup_hours = 0
-    backup_minutes = 0  
     def execute_backup(folder, server_data):
   
         global app_running
