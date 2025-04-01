@@ -203,14 +203,16 @@ def open_backup_interface(server_data=None):
     rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
 
     # Botón para ejecutar
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green")
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data, backup_hours, backup_minutes), fg_color="green")
     execute_button.pack(pady=10)
 
+    folder_path = ""
     scheduled = None
-    def execute_backup(folder, server_data):
+    def execute_backup(folder, server_data, backup_hours, backup_minutes):
   
         global app_running
         nonlocal scheduled
+        nonlocal folder_path
         folder_path = folder.replace("Destino: ", "")
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
@@ -246,6 +248,11 @@ def open_backup_interface(server_data=None):
                         # Pass the update_progress function to the backup process
                         backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
                         update_progress(100, "Respaldo completado.")  # Ensure progress reaches 100%
+                        ocultar_ventana()
+                        messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                        schedule_backup(backup_hours, backup_minutes)
+                        threading.Thread(target=run_scheduler, daemon=True).start()
+                        messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
                     except Exception as e:
                         messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
                     finally:
@@ -259,17 +266,16 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             progress_window.destroy()
             
-            def schedule_backup():
-                interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-                schedule.every(interval_seconds).seconds.do(lambda: execute_programed_backup(folder_path, server_data))
-                messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
-            
-            def run_scheduler():
-                while True:
-                    schedule.run_pending()
-                    time.sleep(1)
-            schedule_backup()
-            threading.Thread(target=run_scheduler, daemon=True).start()
+
+    def schedule_backup(backup_hours, backup_minutes):
+        interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
+        schedule.every(interval_seconds).seconds.do(lambda: execute_programed_backup(folder_path, server_data))
+
+    
+    def run_scheduler():
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
 
     def execute_programed_backup(folder_path, server_data):
         try:
@@ -300,6 +306,9 @@ def open_backup_interface(server_data=None):
     advanced_settings_link.bind("<Enter>", on_enter)
     advanced_settings_link.bind("<Leave>", on_leave) 
 
+    def ocultar_ventana():
+        root.withdraw()  # Oculta la ventana principal
+    
     def show_backup_history():
         try:
             backup_dir = rounded_label.cget("text").replace("Destino: ", "")
@@ -448,6 +457,8 @@ def open_advance_options(parent_window, rounded_label):
                 # Aquí puedes guardar las tareas adicionales en una lista o archivo según sea necesario
 
             messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
+            ocultar_ventana()  # Ocultar la ventana de configuración avanzada
+            return backup_hours, backup_minutes, additional_tasks  # Retornar los valores de horas y minutos
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
             # Mantener la ventana abierta para permitir correcciones
@@ -456,6 +467,9 @@ def open_advance_options(parent_window, rounded_label):
 
     save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings, fg_color="green")
     save_button.pack(pady=20)
+
+    def ocultar_ventana():
+        root.withdraw()  # Oculta la ventana principal
 
     # Detectar el cierre de la ventana
     def on_closing():
