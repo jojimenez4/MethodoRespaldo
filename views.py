@@ -4,7 +4,7 @@ import time
 import threading
 import schedule
 import customtkinter
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk, Spinbox
 from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
 from PIL import Image, ImageTk  # Import PIL for image handling
 
@@ -38,25 +38,24 @@ def create_login_interface():
     button = customtkinter.CTkSwitch(frame, command=switch_mode, text="oscuro")
     button.pack(pady=10, padx=10, anchor="ne")  # Positioned at the top-right corner
 
-    # Add a logo below the switch button
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))  # Get the current directory
-        logo_path = os.path.join(base_dir, "assets", "METHODO.png")
-        logo_image = Image.open(logo_path)
-        logo_image = logo_image.resize((150, 150))  # Resize the logo as needed
-        logo_photo = ImageTk.PhotoImage(logo_image)
-        logo_label = customtkinter.CTkLabel(frame, image=logo_photo, text="")
-        logo_label.image = logo_photo  # Keep a reference to avoid garbage collection
-        logo_label.pack(pady=10)  # Positioned below the switch button
-    except Exception as e:
-        print(f"Error loading logo: {e}")
+
+    #logo methodo
+    base_dir = os.path.dirname(os.path.abspath(__file__))  # Get the current directory
+    logo_path = os.path.join(base_dir, "assets", "METHODO.png")
+    logo_image = Image.open(logo_path)
+    logo_image = logo_image.resize((200, 200))  # Resize the logo as needed
+    logo_photo = ImageTk.PhotoImage(logo_image)
+    logo_label = customtkinter.CTkLabel(frame, image=logo_photo, text="")
+    logo_label.image = logo_photo  # Keep a reference to avoid garbage collection
+    logo_label.pack(pady=0)  # Positioned below the switch button
+    
 
     # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
-    username_label.pack(pady=5)
+    username_label.pack(pady=0)
     username_entry = customtkinter.CTkEntry(frame)
     username_entry.insert(0, "admin")  # Usuario por defecto
-    username_entry.pack(pady=5)
+    username_entry.pack(pady=0)
 
     # Etiqueta y campo para la contraseña
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
@@ -235,6 +234,20 @@ def open_backup_interface(server_data=None):
         progress_window = customtkinter.CTkToplevel(root)
         progress_window.title("Realizando Respaldo")
         progress_window.geometry("300x100")
+        progress_window.overrideredirect(True)  
+
+
+
+        # Centrar la ventana en la pantalla
+        progress_window.update_idletasks()
+        screen_width = progress_window.winfo_screenwidth()
+        screen_height = progress_window.winfo_screenheight()
+        window_width = 300
+        window_height = 100
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        progress_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
         progress_window.grab_set()  
 
         # Barra de progreso
@@ -357,37 +370,56 @@ def open_backup_interface(server_data=None):
     root.mainloop()
     
     
-def open_delete_backups_calendar(parent_window):
+def open_delete_backups_spinbox(parent_window):
     parent_window.withdraw()  # Hide the parent window
-    calendar_window = customtkinter.CTk()
-    calendar_window.title("Seleccionar días para borrar respaldos")
-    calendar_window.geometry("600x400")
+    spinbox_window = customtkinter.CTk()
+    spinbox_window.title("Seleccionar cantidad de respaldos a borrar")
+    spinbox_window.geometry("400x200")
 
-    frame = customtkinter.CTkFrame(calendar_window)
+    frame = customtkinter.CTkFrame(spinbox_window)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-    label = customtkinter.CTkLabel(frame, text="Selecciona los días para borrar respaldos", font=("Helvetica", 14))
+    label = customtkinter.CTkLabel(frame, text="Selecciona la cantidad de respaldos a borrar", font=("Helvetica", 14))
     label.pack(pady=10)
 
-    # Crear checkboxes para días del mes
-    days_frame = customtkinter.CTkFrame(frame)
-    days_frame.pack(pady=10, padx=10, fill="both", expand=True)
+    # Variable for the spinbox value
+    spinbox_var = customtkinter.IntVar(value=1)
 
-    day_vars = []
-    for i in range(1, 32):
-        var = customtkinter.BooleanVar()
-        checkbox = customtkinter.CTkCheckBox(days_frame, text=str(i), variable=var)
-        checkbox.grid(row=(i - 1) // 7, column=(i - 1) % 7, padx=5, pady=5)
-        day_vars.append(var)
+    # Frame para el campo de entrada numérica
+    spinbox_frame = customtkinter.CTkFrame(frame)
+    spinbox_frame.pack(pady=10)
+
+    # Campo de entrada numérica (sin flechas)
+    numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
+    numeric_entry.pack(side="left", padx=5)
+
+    # Decrease button
+    def decrease_value():
+        current_value = spinbox_var.get()
+        if current_value > 1:
+            spinbox_var.set(current_value - 1)
+
+    decrease_button = customtkinter.CTkButton(spinbox_frame, text="-", width=30, command=decrease_value, fg_color="red")
+    decrease_button.pack(side="left", padx=5)
+
+    # Spinbox without increment/decrement buttons
+    spinbox = Spinbox(spinbox_frame, from_=1, to=100, textvariable=spinbox_var, width=10, font=("Helvetica", 12), justify="center", state="readonly", wrap=True)
+    spinbox.pack(side="left", padx=5)
+
+    # Increase button
+    def increase_value():
+        current_value = spinbox_var.get()
+        if current_value < 100:
+            spinbox_var.set(current_value + 1)
+
+    increase_button = customtkinter.CTkButton(spinbox_frame, text="+", width=30, command=increase_value, fg_color="green")
+    increase_button.pack(side="left", padx=5)
 
     # Botón para confirmar selección
     def confirm_selection():
-        selected_days = [str(i + 1) for i, var in enumerate(day_vars) if var.get()]
-        if selected_days:
-            messagebox.showinfo("Días seleccionados", f"Días seleccionados: {', '.join(selected_days)}")
-        else:
-            messagebox.showinfo("Sin selección", "No se seleccionaron días.")
-        calendar_window.destroy()
+        selected_value = spinbox_var.get()
+        messagebox.showinfo("Cantidad seleccionada", f"Cantidad de respaldos a borrar: {selected_value}")
+        spinbox_window.destroy()
         parent_window.deiconify()  # Restore the parent window
 
     confirm_button = customtkinter.CTkButton(frame, text="Confirmar", command=confirm_selection, fg_color="green")
@@ -395,10 +427,10 @@ def open_delete_backups_calendar(parent_window):
 
     def on_closing():
         parent_window.deiconify()  # Restore the parent window
-        calendar_window.destroy()
+        spinbox_window.destroy()
 
-    calendar_window.protocol("WM_DELETE_WINDOW", on_closing)
-    calendar_window.mainloop()
+    spinbox_window.protocol("WM_DELETE_WINDOW", on_closing)
+    spinbox_window.mainloop()
 
 # Función pa programar repaldo 
 
@@ -421,7 +453,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
 
     # Checkbox para borrar respaldos
     delete_backups_var = customtkinter.BooleanVar()
-    delete_backups_checkbox = customtkinter.CTkCheckBox(frame, text="Borrar respaldos", variable=delete_backups_var, command=lambda: open_delete_backups_calendar(root) if delete_backups_var.get() else None)
+    delete_backups_checkbox = customtkinter.CTkCheckBox(frame, text="Borrar respaldos", variable=delete_backups_var, command=lambda: open_delete_backups_spinbox(root) if delete_backups_var.get() else None)
 
     def add_task():
         if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales

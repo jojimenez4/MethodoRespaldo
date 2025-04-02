@@ -5,4 +5,3 @@ if __name__ == "__main__":
         create_login_interface()
     except Exception as e:
         print(f"An error occurred: {e}")
-        
