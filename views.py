@@ -6,6 +6,7 @@ import schedule
 import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
+from PIL import Image, ImageTk  # Import PIL for image handling
 
 customtkinter.set_appearance_mode("dark") 
 
@@ -16,12 +17,7 @@ def create_login_interface():
     global app_running
     login_window = customtkinter.CTk()
     login_window.title("Login")
-    login_window.geometry("400x300")
-    
-    frame = customtkinter.CTkFrame(login_window, corner_radius=10)
-    frame.pack(pady=20, padx=20, fill="both", expand=True)
-
-
+    login_window.geometry("400x500")  # Adjusted height to accommodate the layout
 
     switch = customtkinter.StringVar(value="dark")
 
@@ -34,9 +30,26 @@ def create_login_interface():
             customtkinter.set_appearance_mode("dark")
             button.configure(text="oscuro")
             switch.set("dark")
-    
+
+    frame = customtkinter.CTkFrame(login_window, corner_radius=10)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+    # Move the switch button to the top-right corner
     button = customtkinter.CTkSwitch(frame, command=switch_mode, text="oscuro")
-    button.pack(pady=10, padx=10, anchor="ne")
+    button.pack(pady=10, padx=10, anchor="ne")  # Positioned at the top-right corner
+
+    # Add a logo below the switch button
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))  # Get the current directory
+        logo_path = os.path.join(base_dir, "assets", "METHODO.png")
+        logo_image = Image.open(logo_path)
+        logo_image = logo_image.resize((150, 150))  # Resize the logo as needed
+        logo_photo = ImageTk.PhotoImage(logo_image)
+        logo_label = customtkinter.CTkLabel(frame, image=logo_photo, text="")
+        logo_label.image = logo_photo  # Keep a reference to avoid garbage collection
+        logo_label.pack(pady=10)  # Positioned below the switch button
+    except Exception as e:
+        print(f"Error loading logo: {e}")
 
     # Etiqueta y campo para el nombre de usuario
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
@@ -211,7 +224,6 @@ def open_backup_interface(server_data=None):
   
 
     def execute_backup(folder, server_data):
-  
         global app_running
         nonlocal scheduled
         folder_path = folder.replace("Destino: ", "")
@@ -263,21 +275,29 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             progress_window.destroy()
 
+        # Configurar respaldo automático
+        def schedule_backup():
+            global backup_hours, backup_minutes
+            if backup_hours is None or backup_minutes is None:
+                messagebox.showerror("Error", "No se ha configurado el tiempo de respaldo automático.")
+                return
 
-            scheduled = True
-            
-            def schedule_backup():
-                interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-                schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
+            interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
+            schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
 
-                messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
-            
-            def run_scheduler():
-                while True:
+            messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
+
+            # Inicia un hilo para ejecutar las tareas programadas
+            def run_schedule():
+                while app_running:
                     schedule.run_pending()
                     time.sleep(1)
-            schedule_backup()
-            threading.Thread(target=run_scheduler, daemon=True).start()
+
+            threading.Thread(target=run_schedule, daemon=True).start()
+
+        if not scheduled:
+            scheduled = True
+            threading.Thread(target=schedule_backup, daemon=True).start()
 
     def execute_programed_backup(folder_path, server_data):
         try:
@@ -296,7 +316,7 @@ def open_backup_interface(server_data=None):
     # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
-    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root, rounded_label))
+    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root, rounded_label, server_data))
 
     # Función para cambiar el color al hacer hover
     def on_enter(event):
@@ -337,15 +357,58 @@ def open_backup_interface(server_data=None):
     root.mainloop()
     
     
-    
+def open_delete_backups_calendar(parent_window):
+    parent_window.withdraw()  # Hide the parent window
+    calendar_window = customtkinter.CTk()
+    calendar_window.title("Seleccionar días para borrar respaldos")
+    calendar_window.geometry("600x400")
+
+    frame = customtkinter.CTkFrame(calendar_window)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+    label = customtkinter.CTkLabel(frame, text="Selecciona los días para borrar respaldos", font=("Helvetica", 14))
+    label.pack(pady=10)
+
+    # Crear checkboxes para días del mes
+    days_frame = customtkinter.CTkFrame(frame)
+    days_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+    day_vars = []
+    for i in range(1, 32):
+        var = customtkinter.BooleanVar()
+        checkbox = customtkinter.CTkCheckBox(days_frame, text=str(i), variable=var)
+        checkbox.grid(row=(i - 1) // 7, column=(i - 1) % 7, padx=5, pady=5)
+        day_vars.append(var)
+
+    # Botón para confirmar selección
+    def confirm_selection():
+        selected_days = [str(i + 1) for i, var in enumerate(day_vars) if var.get()]
+        if selected_days:
+            messagebox.showinfo("Días seleccionados", f"Días seleccionados: {', '.join(selected_days)}")
+        else:
+            messagebox.showinfo("Sin selección", "No se seleccionaron días.")
+        calendar_window.destroy()
+        parent_window.deiconify()  # Restore the parent window
+
+    confirm_button = customtkinter.CTkButton(frame, text="Confirmar", command=confirm_selection, fg_color="green")
+    confirm_button.pack(pady=10)
+
+    def on_closing():
+        parent_window.deiconify()  # Restore the parent window
+        calendar_window.destroy()
+
+    calendar_window.protocol("WM_DELETE_WINDOW", on_closing)
+    calendar_window.mainloop()
+
 # Función pa programar repaldo 
 
 scheduled_backup_thread = None
 scheduled = False  # Variable para saber si el respaldo está programado
 
 
-def open_advance_options(parent_window, rounded_label):
+def open_advance_options(parent_window, rounded_label, server_data=None):  # Add server_data as a parameter
     global scheduled, scheduled_backup_thread  # aki se llaman las variables globales
+    parent_window.withdraw()  # Hide the parent window
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     root.geometry("500x600")
@@ -356,6 +419,9 @@ def open_advance_options(parent_window, rounded_label):
      # Lista para almacenar las tareas adicionales
     additional_tasks = []
 
+    # Checkbox para borrar respaldos
+    delete_backups_var = customtkinter.BooleanVar()
+    delete_backups_checkbox = customtkinter.CTkCheckBox(frame, text="Borrar respaldos", variable=delete_backups_var, command=lambda: open_delete_backups_calendar(root) if delete_backups_var.get() else None)
 
     def add_task():
         if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
@@ -383,8 +449,14 @@ def open_advance_options(parent_window, rounded_label):
         remove_button = customtkinter.CTkButton(task_frame, text="-", width=30, fg_color="red", command=lambda: remove_task(task_frame))
         remove_button.pack(side="left", padx=(5, 5))
 
-        # Insertar la tarea antes del botón "Guardar Configuración"
-        task_frame.pack(pady=5, padx=10, fill="x", before=save_button)
+        # Insertar la tarea en el frame
+        task_frame.pack(pady=5, padx=10, fill="x")
+
+        # Mover el checkbox y el botón de guardar dinámicamente
+        delete_backups_checkbox.pack_forget()  # Remove the checkbox temporarily
+        save_button.pack_forget()  # Remove the save button temporarily
+        delete_backups_checkbox.pack(pady=10, after=task_frame)  # Repack the checkbox below the last task
+        save_button.pack(pady=20, after=delete_backups_checkbox)  # Repack the save button below the checkbox
 
         # Agregar la tarea a la lista
         additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
@@ -425,32 +497,33 @@ def open_advance_options(parent_window, rounded_label):
     hour_combobox.configure(justify="center")
     minute_combobox.configure(justify="center")
 
-
-
-    
+    # Mover el checkbox dinámicamente
+    delete_backups_checkbox.pack(pady=10)
 
     def save_advanced_settings():
-
-        global scheduled, scheduled_backup_thread  # se llama en el guardao global scheduled pa detener el respaldo automatico y configurar otraeh
-
+        global scheduled, scheduled_backup_thread, app_running  # Access global variables
         try:
             # Verificar si se seleccionó una carpeta de destino
             folder_path = rounded_label.cget("text").replace("Destino: ", "")
             if not folder_path:
                 raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
-            
-            if scheduled:
-                confirm = messagebox.askyesno("Confirmación", "¿Deseas detener el respaldo automático actual y configurar uno nuevo?")
-                if confirm:
-                    # Detener el respaldo programado actual
-                    if scheduled_backup_thread is not None:
-                        scheduled_backup_thread.join()  # Esperar a que el hilo se termine si está corriendo
-                    schedule.clear()  # Limpiar las tareas programadas
-                    scheduled = False  # Marcar como no programado
-            
 
-            # Guardar la configuración de la tarea predeterminada
-            
+            # Check if a backup process is running
+            if scheduled:
+                confirm = messagebox.askyesno(
+                    "Confirmación",
+                    "Un respaldo automático está en curso. ¿Deseas detenerlo para configurar uno nuevo?"
+                )
+                if confirm:
+                    # Stop the current backup process
+                    app_running = False  # Signal threads to stop
+                    if scheduled_backup_thread is not None and scheduled_backup_thread.is_alive():
+                        scheduled_backup_thread.join(timeout=5)  # Wait for the thread to finish
+                    schedule.clear()  # Clear all scheduled tasks
+                    scheduled = False  # Mark as not scheduled
+                    app_running = True  # Reset the flag for new processes
+
+            # Save the default task configuration
             hours = int(hour_combobox.get())
             minutes = int(minute_combobox.get())
             if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
@@ -459,22 +532,26 @@ def open_advance_options(parent_window, rounded_label):
             backup_hours = hours
             backup_minutes = minutes
 
-
-            # Guardar las tareas adicionales
+            # Save additional tasks
             for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
                 task_hours = int(task_hour_combobox.get())
                 task_minutes = int(task_minute_combobox.get())
                 if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
                     raise ValueError("Horas o minutos inválidos en una tarea adicional.")
-                # Aquí puedes guardar las tareas adicionales en una lista o archivo según sea necesario
+                # Save additional tasks as needed (e.g., to a list or file)
+
+            # Update the destination path in the main interface
+            parent_window.update_idletasks()  # Ensure changes are reflected
+            rounded_label.configure(text=f"Destino: {folder_path}")
 
             messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
-            root.destroy()  # Cierra la ventana actual
+            root.destroy()  # Close the current window
+            parent_window.deiconify()  # Re-enable the main window
 
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
-
-            root.destroy()  # Cierra la ventana actual en caso de error
+            root.destroy()  # Close the current window in case of error
+            parent_window.deiconify()  # Re-enable the parent window
 
     save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings, fg_color="green")
     save_button.pack(pady=20)
