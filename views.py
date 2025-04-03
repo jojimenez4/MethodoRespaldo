@@ -7,17 +7,26 @@ import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk, Spinbox
 from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
 from PIL import Image, ImageTk  # Import PIL for image handling
+from customtkinter import CTkImage  # Import CTkImage for handling images
 
 customtkinter.set_appearance_mode("dark") 
 
 # Add a global flag to track if the app is running
 app_running = True
 
+def center_window(window, width, height):
+    """Centrar una ventana en la pantalla."""
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    x = (screen_width // 2) - (width // 2)
+    y = (screen_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
 def create_login_interface():
     global app_running
     login_window = customtkinter.CTk()
     login_window.title("Login")
-    login_window.geometry("400x500")  # Adjusted height to accommodate the layout
+    center_window(login_window, 400, 500)  # Centrar la ventana
 
     switch = customtkinter.StringVar(value="dark")
 
@@ -43,10 +52,8 @@ def create_login_interface():
     base_dir = os.path.dirname(os.path.abspath(__file__))  # Get the current directory
     logo_path = os.path.join(base_dir, "assets", "METHODO.png")
     logo_image = Image.open(logo_path)
-    logo_image = logo_image.resize((200, 200))  # Resize the logo as needed
-    logo_photo = ImageTk.PhotoImage(logo_image)
-    logo_label = customtkinter.CTkLabel(frame, image=logo_photo, text="")
-    logo_label.image = logo_photo  # Keep a reference to avoid garbage collection
+    logo_ctk_image = CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))  # Use CTkImage
+    logo_label = customtkinter.CTkLabel(frame, image=logo_ctk_image, text="")
     logo_label.pack(pady=0)  # Positioned below the switch button
     
 
@@ -93,7 +100,7 @@ def create_server_interface():
     global app_running
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor MySQL")
-    server_window.geometry("800x350")
+    center_window(server_window, 800, 350)  # Centrar la ventana
 
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
@@ -174,53 +181,103 @@ def create_server_interface():
     
 # wea pa comprimir con contraseña
 
+def open_file_interface(parent_window):
+    parent_window.withdraw()  # Hide the parent window
+    file_window = customtkinter.CTk()
+    file_window.title("Desencritar")
+    center_window(file_window, 400, 300)  # Centrar la ventana
+
+    frame = customtkinter.CTkFrame(file_window)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+    #texto para label
+    label = customtkinter.CTkLabel(frame, text="Selecciona el archivo a desencriptar", font=("Helvetica", 16), width=40)
+    label.pack(pady=5, padx=5)
+
+    # Label to display the selected file path
+    file_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=40,corner_radius=10, fg_color="gray")
+    file_label.pack(fill="x", expand=True)
+
+    # Function to select a file
+    # Función para seleccionar un archivo
+    def select_file():
+        file_path = filedialog.askopenfilename(filetypes=[("RAR Files", "*.rar")])
+        if file_path:
+            file_label.configure(text=f"Archivo: {file_path}")  # Actualizar el texto del label
+        else:
+            file_label.configure(text="Archivo no seleccionado")  # Mostrar mensaje si no se selecciona archivo
+    
+    # Button to browse for a file
+    browse_button = customtkinter.CTkButton(frame, text="Buscar Archivo", command=select_file, fg_color="green")
+    browse_button.pack(pady=10)
+
+    # Function to insert the file with a password
+    def insert_file():
+        file_path = file_label.cget("text").replace("Archivo: ", "")
+        if not file_path or file_path == "Archivo no seleccionado":
+            messagebox.showerror("Error", "No se seleccionó ningún archivo.")
+            return
+
+        # Prompt for a password
+        password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo:", show="*")
+        if password:
+            messagebox.showinfo("Éxito", f"Archivo '{file_path}' protegido con contraseña.")
+        else:
+            messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
+
+    # Button to insert the file
+    insert_button = customtkinter.CTkButton(frame, text="Desencriptar", command=insert_file, fg_color="blue")
+    insert_button.pack(pady=10)
+
+ 
+
+    def on_closing():
+        parent_window.deiconify()  # Restore the parent window
+        file_window.destroy()
+
+    file_window.protocol("WM_DELETE_WINDOW", on_closing)
+    file_window.mainloop()
+
 def open_backup_interface(server_data=None):
     global app_running
     root = customtkinter.CTk()
     root.title("Respaldo local")
-    root.geometry("600x400")
+    center_window(root, 600, 400)
 
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
-    # Botón para mostrar el historial de respaldos en la esquina superior derecha
-    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command= lambda: show_backup_history(), fg_color="green")
+    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command=lambda: show_backup_history(), fg_color="green")
     history_button.pack(pady=10, padx=10, anchor="ne")
 
-    label = customtkinter.CTkLabel(frame, text="Selecciona carpeta destino", font=("Helvetica", 16), width=40)
-    label.pack(pady=5, padx=5)
+    eye_button = customtkinter.CTkButton(frame, text="👁", width=30, command=lambda: open_file_interface(root), fg_color="blue")
+    eye_button.pack(pady=10, padx=10, anchor="ne")
 
     def update_label():
         folder = filedialog.askdirectory()
-        if (folder):
-            rounded_label.configure(text=f"Destino: {folder}")
+        if folder:
+            rounded_label.configure(text=folder)
             return folder
         else:
             messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
             return ""
 
     folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label, fg_color="green")
-    folder_button.pack(pady=10)
+    folder_button.pack(pady=5)
 
     result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=30)
-    result_label.pack(pady=10)
+    result_label.pack(pady=0)
 
-    # Frame para la etiqueta redondeada y el icono de calendario
     date_frame = customtkinter.CTkFrame(frame)
-    date_frame.pack(pady=10, padx=10, fill="x")
+    date_frame.pack(pady=5, padx=5, fill="x", expand=True)
 
-    # Etiqueta redondeada para mostrar la dirección de la carpeta seleccionada
     rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=40)
-    rounded_label.pack(side="left", pady=10, padx=10, fill="x", expand=True)
+    rounded_label.pack(pady=5, fill="x", expand=True)
 
-    # Botón para ejecutar
     execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green")
     execute_button.pack(pady=10)
 
-
-
     scheduled = None
-  
 
     def execute_backup(folder, server_data):
         global app_running
@@ -229,16 +286,12 @@ def open_backup_interface(server_data=None):
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
-        
-        # Crear una ventana de progreso
+
         progress_window = customtkinter.CTkToplevel(root)
         progress_window.title("Realizando Respaldo")
         progress_window.geometry("300x100")
-        progress_window.overrideredirect(True)  
+        progress_window.overrideredirect(True)
 
-
-
-        # Centrar la ventana en la pantalla
         progress_window.update_idletasks()
         screen_width = progress_window.winfo_screenwidth()
         screen_height = progress_window.winfo_screenheight()
@@ -248,47 +301,46 @@ def open_backup_interface(server_data=None):
         y = (screen_height // 2) - (window_height // 2)
         progress_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
-        progress_window.grab_set()  
+        progress_window.grab_set()
 
-        # Barra de progreso
         progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
         progressbar.pack(pady=10, padx=10)
 
-        # Etiqueta para mostrar el progreso
         progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
         progress_label.pack(pady=5)
 
         def update_progress(value, text):
-            if app_running:  # Check if the app is still running
+            if app_running and progress_window.winfo_exists():
                 progressbar['value'] = value
                 progress_label.configure(text=text)
-                progress_window.update_idletasks()  # Ensure UI updates are reflected
+                progress_window.update_idletasks()
 
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 progress_window.destroy()
                 return
-            if  server_data[0] == "MySQL Server (TCP/IP)":
+            if server_data[0] == "MySQL Server (TCP/IP)":
                 def backup_with_progress():
                     try:
-                        # Pass the update_progress function to the backup process
                         backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
-                        update_progress(100, "Respaldo completado.")  # Ensure progress reaches 100%
+                        update_progress(100, "Respaldo completado.")
                     except Exception as e:
-                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                        if progress_window.winfo_exists():
+                            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
                     finally:
-                        progress_window.destroy()
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
 
                 threading.Thread(target=backup_with_progress, daemon=True).start()
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
                 progress_window.destroy()
         except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            if progress_window.winfo_exists():
+                messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             progress_window.destroy()
 
-        # Configurar respaldo automático
         def schedule_backup():
             global backup_hours, backup_minutes
             if backup_hours is None or backup_minutes is None:
@@ -300,7 +352,6 @@ def open_backup_interface(server_data=None):
 
             messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
 
-            # Inicia un hilo para ejecutar las tareas programadas
             def run_schedule():
                 while app_running:
                     schedule.run_pending()
@@ -326,12 +377,10 @@ def open_backup_interface(server_data=None):
             message = f"Error al ejecutar el respaldo: {e}"
             send_email(message)
 
-    # Texto link para abrir la interfaz de configuración avanzada
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
     advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root, rounded_label, server_data))
 
-    # Función para cambiar el color al hacer hover
     def on_enter(event):
         advanced_settings_link.configure(text_color="deep sky blue")
 
@@ -339,16 +388,16 @@ def open_backup_interface(server_data=None):
         advanced_settings_link.configure(text_color="green")
 
     advanced_settings_link.bind("<Enter>", on_enter)
-    advanced_settings_link.bind("<Leave>", on_leave) 
+    advanced_settings_link.bind("<Leave>", on_leave)
 
     def show_backup_history():
         try:
             backup_dir = rounded_label.cget("text").replace("Destino: ", "")
             if not os.path.exists(backup_dir):
-                raise ValueError("El directorio de respaldos no existe.") 
+                raise ValueError("El directorio de respaldos no existe.")
             backup_files = [
                 os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".rar")
-            ] 
+            ]
             if not backup_files:
                 raise ValueError("No hay respaldos disponibles.")
             backup_files.sort(key=os.path.getmtime, reverse=True)
@@ -365,72 +414,10 @@ def open_backup_interface(server_data=None):
     def on_closing():
         global app_running
         app_running = False
-        root.destroy()  # Cierra la ventana actual
+        root.destroy()
+
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
-    
-    
-def open_delete_backups_spinbox(parent_window):
-    parent_window.withdraw()  # Hide the parent window
-    spinbox_window = customtkinter.CTk()
-    spinbox_window.title("Seleccionar cantidad de respaldos a borrar")
-    spinbox_window.geometry("400x200")
-
-    frame = customtkinter.CTkFrame(spinbox_window)
-    frame.pack(pady=20, padx=20, fill="both", expand=True)
-
-    label = customtkinter.CTkLabel(frame, text="Selecciona la cantidad de respaldos a borrar", font=("Helvetica", 14))
-    label.pack(pady=10)
-
-    # Variable for the spinbox value
-    spinbox_var = customtkinter.IntVar(value=1)
-
-    # Frame para el campo de entrada numérica
-    spinbox_frame = customtkinter.CTkFrame(frame)
-    spinbox_frame.pack(pady=10)
-
-    # Campo de entrada numérica (sin flechas)
-    numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
-    numeric_entry.pack(side="left", padx=5)
-
-    # Decrease button
-    def decrease_value():
-        current_value = spinbox_var.get()
-        if current_value > 1:
-            spinbox_var.set(current_value - 1)
-
-    decrease_button = customtkinter.CTkButton(spinbox_frame, text="-", width=30, command=decrease_value, fg_color="red")
-    decrease_button.pack(side="left", padx=5)
-
-    # Spinbox without increment/decrement buttons
-    spinbox = Spinbox(spinbox_frame, from_=1, to=100, textvariable=spinbox_var, width=10, font=("Helvetica", 12), justify="center", state="readonly", wrap=True)
-    spinbox.pack(side="left", padx=5)
-
-    # Increase button
-    def increase_value():
-        current_value = spinbox_var.get()
-        if current_value < 100:
-            spinbox_var.set(current_value + 1)
-
-    increase_button = customtkinter.CTkButton(spinbox_frame, text="+", width=30, command=increase_value, fg_color="green")
-    increase_button.pack(side="left", padx=5)
-
-    # Botón para confirmar selección
-    def confirm_selection():
-        selected_value = spinbox_var.get()
-        messagebox.showinfo("Cantidad seleccionada", f"Cantidad de respaldos a borrar: {selected_value}")
-        spinbox_window.destroy()
-        parent_window.deiconify()  # Restore the parent window
-
-    confirm_button = customtkinter.CTkButton(frame, text="Confirmar", command=confirm_selection, fg_color="green")
-    confirm_button.pack(pady=10)
-
-    def on_closing():
-        parent_window.deiconify()  # Restore the parent window
-        spinbox_window.destroy()
-
-    spinbox_window.protocol("WM_DELETE_WINDOW", on_closing)
-    spinbox_window.mainloop()
 
 # Función pa programar repaldo 
 
@@ -443,17 +430,14 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
     parent_window.withdraw()  # Hide the parent window
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
-    root.geometry("500x600")
+    center_window(root, 500, 600)  # Centrar la ventana
 
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=20, padx=60, fill="both", expand=True)
 
-     # Lista para almacenar las tareas adicionales
+    # Lista para almacenar las tareas adicionales
     additional_tasks = []
 
-    # Checkbox para borrar respaldos
-    delete_backups_var = customtkinter.BooleanVar()
-    delete_backups_checkbox = customtkinter.CTkCheckBox(frame, text="Borrar respaldos", variable=delete_backups_var, command=lambda: open_delete_backups_spinbox(root) if delete_backups_var.get() else None)
 
     def add_task():
         if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
@@ -484,11 +468,11 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
         # Insertar la tarea en el frame
         task_frame.pack(pady=5, padx=10, fill="x")
 
-        # Mover el checkbox y el botón de guardar dinámicamente
-        delete_backups_checkbox.pack_forget()  # Remove the checkbox temporarily
-        save_button.pack_forget()  # Remove the save button temporarily
-        delete_backups_checkbox.pack(pady=10, after=task_frame)  # Repack the checkbox below the last task
-        save_button.pack(pady=20, after=delete_backups_checkbox)  # Repack the save button below the checkbox
+        # Mover el Spinbox y el botón de guardar hacia abajo
+        spinbox_frame.pack_forget()
+        save_button.pack_forget()
+        spinbox_frame.pack(pady=10, after=task_frame)
+        save_button.pack(pady=20)
 
         # Agregar la tarea a la lista
         additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
@@ -500,12 +484,15 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
                 task_frame.destroy()
                 break
 
+        # Reajustar la posición del Spinbox y el botón de guardar
+        spinbox_frame.pack_forget()
+        save_button.pack_forget()
+        spinbox_frame.pack(pady=10)
+        save_button.pack(pady=20)
+
     # Botón para agregar tareas adicionales
     add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
     add_task_button.pack(pady=10, padx=5, anchor="ne")
-
-    time_label = customtkinter.CTkLabel(frame, text="Configurar tiempo de respaldo", font=("Helvetica", 16))
-    time_label.pack(pady=10)
 
     # Frame para las entradas de horas y minutos
     time_frame = customtkinter.CTkFrame(frame)
@@ -513,24 +500,59 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
 
     # Campo para horas
     hour_label = customtkinter.CTkLabel(time_frame, text="Hora:")
-    hour_label.pack(side="left", padx=(15, 5), anchor="w")  # Añadir padding para alineación
+    hour_label.pack(side="left", padx=(15, 5))  # Añadir padding para alineación
     hour_combobox = customtkinter.CTkComboBox(time_frame, values=[str(h).zfill(2) for h in range(24)], width=80)
     hour_combobox.set("00")  # Valor predeterminado
-    hour_combobox.pack(side="left", padx=(5, 5), anchor="w")  # Ajustar padding
+    hour_combobox.pack(side="left", padx=(5, 5))  # Ajustar padding
 
     # Campo para minutos
     minute_label = customtkinter.CTkLabel(time_frame, text="Minuto:")
-    minute_label.pack(side="left", padx=(5, 5), anchor="w")  # Añadir padding para alineación
+    minute_label.pack(side="left", padx=(5, 5))  # Añadir padding para alineación
     minute_combobox = customtkinter.CTkComboBox(time_frame, values=[str(m).zfill(2) for m in range(60)], width=80)
     minute_combobox.set("00")  # Valor predeterminado
-    minute_combobox.pack(side="left", padx=(5, 5), anchor="w")  # Ajustar padding
+    minute_combobox.pack(side="left", padx=(5, 5))  # Ajustar padding
 
         # Centrar el texto dentro del combobox
     hour_combobox.configure(justify="center")
     minute_combobox.configure(justify="center")
 
-    # Mover el checkbox dinámicamente
-    delete_backups_checkbox.pack(pady=10)
+    spinbox_var = customtkinter.IntVar(value=1)
+
+    # Frame para el Spinbox
+    spinbox_frame = customtkinter.CTkFrame(frame)
+    spinbox_frame.pack(pady=10)
+
+    numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
+    numeric_entry.pack(side="left", padx=5)
+
+    def decrease_value():
+        current_value = spinbox_var.get()
+        if current_value > 1:
+            spinbox_var.set(current_value - 1)
+            numeric_entry.delete(0, "end")
+            numeric_entry.insert(0, str(spinbox_var.get()))
+
+
+
+    
+
+
+    decrease_button = customtkinter.CTkButton(spinbox_frame, text="-", width=30, command=decrease_value, fg_color="red")
+    decrease_button.pack(side="left", padx=5)
+
+    def increase_value():
+        current_value = spinbox_var.get()
+        if current_value < 100:
+            spinbox_var.set(current_value + 1)
+            numeric_entry.delete(0, "end")
+            numeric_entry.insert(0, str(spinbox_var.get()))
+
+            
+    
+    increase_button = customtkinter.CTkButton(spinbox_frame, text="+", width=30, command=increase_value, fg_color="green")
+    increase_button.pack(side="right", padx=0)
+
+
 
     def save_advanced_settings():
         global scheduled, scheduled_backup_thread, app_running  # Access global variables
@@ -571,6 +593,11 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
                 if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
                     raise ValueError("Horas o minutos inválidos en una tarea adicional.")
                 # Save additional tasks as needed (e.g., to a list or file)
+
+            # Show message for selected spinbox value
+            selected_value = spinbox_var.get()
+            if selected_value > 0:  # Ensure a valid value is selected
+                messagebox.showinfo("Cantidad seleccionada", f"Cantidad de respaldos a borrar: {selected_value}")
 
             # Update the destination path in the main interface
             parent_window.update_idletasks()  # Ensure changes are reflected
