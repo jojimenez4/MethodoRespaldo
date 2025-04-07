@@ -5,7 +5,7 @@ import threading
 import schedule
 import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk, Spinbox
-from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY, login_to_onedrive
+from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
 from PIL import Image, ImageTk  # Import PIL for image handling
 from customtkinter import CTkImage  # Import CTkImage for handling images
 
@@ -13,6 +13,13 @@ customtkinter.set_appearance_mode("dark")
 
 # Add a global flag to track if the app is running
 app_running = True
+
+# Global list to store task configurations
+task_configurations = []
+
+# Add global variables for backup scheduling
+backup_hours = None
+backup_minutes = None
 
 def center_window(window, width, height):
     """Centrar una ventana en la pantalla."""
@@ -240,7 +247,7 @@ def open_file_interface(parent_window):
     file_window.mainloop()
 
 def open_backup_interface(server_data=None):
-    global app_running
+    global app_running, backup_hours, backup_minutes
     root = customtkinter.CTk()
     root.title("Respaldo local")
     center_window(root, 600, 400)
@@ -255,7 +262,7 @@ def open_backup_interface(server_data=None):
     eye_button.pack(pady=10, padx=10, anchor="ne")
 
     # Modify the cloud button to initiate OneDrive login
-    cloud_button = customtkinter.CTkButton(frame, text="☁", width=30, command=login_to_onedrive, fg_color="gray")
+    cloud_button = customtkinter.CTkButton(frame, text="☁", width=30, fg_color="gray")
     cloud_button.pack(pady=10, padx=10, anchor="ne")
 
     def update_label():
@@ -292,59 +299,72 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
 
-        progress_window = customtkinter.CTkToplevel(root)
-        progress_window.title("Realizando Respaldo")
-        progress_window.geometry("300x100")
-        progress_window.overrideredirect(True)
+        # Add a flag to track if the progress bar has been shown
+        first_execution = not hasattr(execute_backup, "progress_shown")
+        if first_execution:
+            execute_backup.progress_shown = True  # Set the flag
 
-        progress_window.update_idletasks()
-        screen_width = progress_window.winfo_screenwidth()
-        screen_height = progress_window.winfo_screenheight()
-        window_width = 300
-        window_height = 100
-        x = (screen_width // 2) - (window_width // 2)
-        y = (screen_height // 2) - (window_height // 2)
-        progress_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        if first_execution:  # Show progress bar only on the first execution
+            progress_window = customtkinter.CTkToplevel(root)
+            progress_window.title("Realizando Respaldo")
+            progress_window.geometry("300x100")
+            progress_window.overrideredirect(True)
 
-        progress_window.grab_set()
+            progress_window.update_idletasks()
+            screen_width = progress_window.winfo_screenwidth()
+            screen_height = progress_window.winfo_screenheight()
+            window_width = 300
+            window_height = 100
+            x = (screen_width // 2) - (window_width // 2)
+            y = (screen_height // 2) - (window_height // 2)
+            progress_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
-        progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
-        progressbar.pack(pady=10, padx=10)
+            progress_window.grab_set()
 
-        progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
-        progress_label.pack(pady=5)
+            progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
+            progressbar.pack(pady=10, padx=10)
 
-        def update_progress(value, text):
-            if app_running and progress_window.winfo_exists():
-                progressbar['value'] = value
-                progress_label.configure(text=text)
-                progress_window.update_idletasks()
+            progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
+            progress_label.pack(pady=5)
+
+            def update_progress(value, text):
+                if app_running and progress_window.winfo_exists():
+                    progressbar['value'] = value
+                    progress_label.configure(text=text)
+                    progress_window.update_idletasks()
+        else:
+            def update_progress(value, text):
+                pass  # Do nothing if not the first execution
 
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-                progress_window.destroy()
+                if first_execution and progress_window.winfo_exists():
+                    progress_window.destroy()
                 return
             if server_data[0] == "MySQL Server (TCP/IP)":
                 def backup_with_progress():
                     try:
                         backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
-                        update_progress(100, "Respaldo completado.")
+                        if first_execution:
+                            update_progress(100, "Respaldo completado.")
                     except Exception as e:
-                        if progress_window.winfo_exists():
+                        if first_execution and progress_window.winfo_exists():
                             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
                     finally:
-                        if progress_window.winfo_exists():
+                        if first_execution and progress_window.winfo_exists():
                             progress_window.destroy()
 
                 threading.Thread(target=backup_with_progress, daemon=True).start()
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
-                progress_window.destroy()
+                if first_execution and progress_window.winfo_exists():
+                    progress_window.destroy()
         except Exception as e:
-            if progress_window.winfo_exists():
+            if first_execution and progress_window.winfo_exists():
                 messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            progress_window.destroy()
+            if first_execution and progress_window.winfo_exists():
+                progress_window.destroy()
 
         def schedule_backup():
             global backup_hours, backup_minutes
@@ -353,7 +373,7 @@ def open_backup_interface(server_data=None):
                 return
 
             interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-            schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
+            schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data, show_progress=False)
 
             messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
 
@@ -368,19 +388,54 @@ def open_backup_interface(server_data=None):
             scheduled = True
             threading.Thread(target=schedule_backup, daemon=True).start()
 
-    def execute_programed_backup(folder_path, server_data):
+    def execute_programed_backup(folder_path, server_data, show_progress=False):
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
+
+            if show_progress:
+                progress_window = customtkinter.CTkToplevel()
+                progress_window.title("Respaldo Automático")
+                progress_window.geometry("300x100")
+                progress_window.overrideredirect(True)
+
+                progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
+                progressbar.pack(pady=10, padx=10)
+
+                progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando respaldo...")
+                progress_label.pack(pady=5)
+
+                def update_progress(value, text):
+                    if progress_window.winfo_exists():
+                        progressbar['value'] = value
+                        progress_label.configure(text=text)
+                        progress_window.update_idletasks()
+            else:
+                def update_progress(value, text):
+                    pass  # No progress updates for automatic backups
+
             if server_data[0] == "MySQL Server (TCP/IP)":
-                backup_mysql_database(server_data[3], folder_path, server_data[4])
+                def backup_with_progress():
+                    try:
+                        backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
+                        if show_progress:
+                            update_progress(100, "Respaldo completado.")
+                    except Exception as e:
+                        if show_progress and progress_window.winfo_exists():
+                            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    finally:
+                        if show_progress and progress_window.winfo_exists():
+                            progress_window.destroy()
+
+                threading.Thread(target=backup_with_progress, daemon=True).start()
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                if show_progress and progress_window.winfo_exists():
+                    progress_window.destroy()
         except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            message = f"Error al ejecutar el respaldo: {e}"
-            send_email(message)
+            if show_progress:
+                messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
 
     advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
     advanced_settings_link.pack(pady=10)
@@ -431,39 +486,59 @@ scheduled = False  # Variable para saber si el respaldo está programado
 
 
 def open_advance_options(parent_window, rounded_label, server_data=None):  # Add server_data as a parameter
-    global scheduled, scheduled_backup_thread  # aki se llaman las variables globales
+    global scheduled, scheduled_backup_thread, task_configurations, backup_hours, backup_minutes  # Access global variables
+
+    # Pause the automatic backup if scheduled
+    if scheduled:
+        pause_message = f"Se pausará el respaldo automático de la tarea en {str(backup_hours).zfill(2)}:{str(backup_minutes).zfill(2)}. ¿Estás seguro que quieres continuar?"
+        if not messagebox.askyesno("Confirmación", pause_message):
+            return  # Exit if the user does not confirm
+        scheduled = False  # Mark the backup as paused
+
     parent_window.withdraw()  # Hide the parent window
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
-    center_window(root, 500, 600)  # Centrar la ventana
+    center_window(root, 500, 500)  # Centrar la ventana
 
     frame = customtkinter.CTkFrame(root)
-    frame.pack(pady=20, padx=60, fill="both", expand=True)
+    frame.pack(pady=20, padx=60, fill="both")
+
+    # Texto para indicar "Autorespaldos"
+    autorespaldos_label = customtkinter.CTkLabel(frame, text="Auto respaldos", font=("Arial", 14, "bold"))
+    autorespaldos_label.pack(pady=5)
+
+    # Frame to hold tasks dynamically
+    tasks_frame = customtkinter.CTkFrame(frame)
+    tasks_frame.pack(pady=5, padx=10, fill="x", expand=True)
 
     # Lista para almacenar las tareas adicionales
     additional_tasks = []
 
-    def add_task():
-        if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
+    def add_task(hour="00", minute="00"):
+        if len(additional_tasks) >= 3:  # Máximo 3 tareas en total
             messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
             return
 
         # Crear un nuevo frame para la tarea adicional
-        task_frame = customtkinter.CTkFrame(frame)
+        task_frame = customtkinter.CTkFrame(tasks_frame)
 
         # Campo para horas
         task_hour_label = customtkinter.CTkLabel(task_frame, text="Hora:")
         task_hour_label.pack(side="left", padx=(10, 5), anchor="w")  # Adjusted padding and anchor
         task_hour_combobox = customtkinter.CTkComboBox(task_frame, values=[str(h).zfill(2) for h in range(24)], width=80, justify="center")
-        task_hour_combobox.set("00")
+        task_hour_combobox.set(hour)
         task_hour_combobox.pack(side="left", padx=(5, 5), anchor="w")  # Adjusted padding and anchor
 
         # Campo para minutos
         task_minute_label = customtkinter.CTkLabel(task_frame, text="Minuto:")
         task_minute_label.pack(side="left", padx=(5, 5), anchor="w")
         task_minute_combobox = customtkinter.CTkComboBox(task_frame, values=[str(m).zfill(2) for m in range(60)], width=80, justify="center")
-        task_minute_combobox.set("00")
+        task_minute_combobox.set(minute)
         task_minute_combobox.pack(side="left", padx=(5, 5), anchor="w")
+
+        # Centrar el texto dentro del combobox
+        task_hour_combobox.configure(justify="center")
+        task_minute_combobox.configure(justify="center")
 
         # Botón para eliminar la tarea
         remove_button = customtkinter.CTkButton(task_frame, text="-", width=30, fg_color="red", command=lambda: remove_task(task_frame))
@@ -474,6 +549,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
 
         # Agregar la tarea a la lista
         additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
+        update_tasks_label()
 
     def remove_task(task_frame):
         for task in additional_tasks:
@@ -481,32 +557,29 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
                 additional_tasks.remove(task)
                 task_frame.destroy()
                 break
+        update_tasks_label()
+
+    def update_tasks_label():
+        tasks_text = "Tareas configuradas:\n"
+        task_configurations.clear()  # Clear the global list
+        for idx, (_, hour_combobox, minute_combobox) in enumerate(additional_tasks, start=1):
+            hour = hour_combobox.get()
+            minute = minute_combobox.get()
+            task_configurations.append((hour, minute))  # Save to global list
+            tasks_text += f"Tarea {idx}: {hour}:{minute}\n"
+        tasks_label.configure(text=tasks_text)
+
+    # Label to display tasks dynamically
+    tasks_label = customtkinter.CTkLabel(tasks_frame, text="Tareas configuradas:\n", font=("Arial", 12), anchor="w", justify="left")
+    tasks_label.pack(pady=5, padx=5, fill="x")
 
     # Botón para agregar tareas adicionales
     add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
-    add_task_button.pack(pady=10, padx=5, anchor="ne")
+    add_task_button.pack(pady=20, padx=20, anchor="e")
 
-    # Frame para las entradas de horas y minutos
-    time_frame = customtkinter.CTkFrame(frame)
-    time_frame.pack(pady=0, padx=5, fill="x", anchor="center")  # Ajustar padx para alineación
-
-    # Campo para horas
-    hour_label = customtkinter.CTkLabel(time_frame, text="Hora:")
-    hour_label.pack(side="left", padx=(15, 5))  # Añadir padding para alineación
-    hour_combobox = customtkinter.CTkComboBox(time_frame, values=[str(h).zfill(2) for h in range(24)], width=80)
-    hour_combobox.set("00")  # Valor predeterminado
-    hour_combobox.pack(side="left", padx=(5, 5))  # Ajustar padding
-
-    # Campo para minutos
-    minute_label = customtkinter.CTkLabel(time_frame, text="Minuto:")
-    minute_label.pack(side="left", padx=(5, 5))  # Añadir padding para alineación
-    minute_combobox = customtkinter.CTkComboBox(time_frame, values=[str(m).zfill(2) for m in range(60)], width=80)
-    minute_combobox.set("00")  # Valor predeterminado
-    minute_combobox.pack(side="left", padx=(5, 5))  # Ajustar padding
-
-    # Centrar el texto dentro del combobox
-    hour_combobox.configure(justify="center")
-    minute_combobox.configure(justify="center")
+    # Load existing task configurations
+    for hour, minute in task_configurations:
+        add_task(hour, minute)
 
     # Frame para el Spinbox
     spinbox_var = customtkinter.IntVar(value=1)
@@ -541,73 +614,56 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
     increase_button.pack(side="right", padx=0)
 
     def save_advanced_settings():
-        global scheduled, scheduled_backup_thread, app_running  # Access global variables
+        global scheduled, scheduled_backup_thread, app_running, task_configurations, backup_hours, backup_minutes
         try:
-            # Verificar si se seleccionó una carpeta de destino
-            folder_path = rounded_label.cget("text").replace("Destino: ", "")
-            if not folder_path:
-                raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
-
-            # Check if a backup process is running
-            if scheduled:
-                confirm = messagebox.askyesno(
-                    "Confirmación",
-                    "Un respaldo automático está en curso. ¿Deseas detenerlo para configurar uno nuevo?"
-                )
-                if confirm:
-                    # Stop the current backup process
-                    app_running = False  # Signal threads to stop
-                    if scheduled_backup_thread is not None and scheduled_backup_thread.is_alive():
-                        scheduled_backup_thread.join(timeout=5)  # Wait for the thread to finish
-                    schedule.clear()  # Clear all scheduled tasks
-                    scheduled = False  # Mark as not scheduled
-                    app_running = True  # Reset the flag for new processes
-
-            # Save the default task configuration
-            hours = int(hour_combobox.get())
-            minutes = int(minute_combobox.get())
-            if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
-                raise ValueError("Horas o minutos inválidos.")
-            global backup_hours, backup_minutes
-            backup_hours = hours
-            backup_minutes = minutes
-
             # Save additional tasks
+            task_configurations.clear()
             for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
                 task_hours = int(task_hour_combobox.get())
                 task_minutes = int(task_minute_combobox.get())
                 if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
                     raise ValueError("Horas o minutos inválidos en una tarea adicional.")
-                # Save additional tasks as needed (e.g., to a list or file)
+                task_configurations.append((str(task_hours).zfill(2), str(task_minutes).zfill(2)))
+
+            # Save backup hours and minutes from the first task configuration
+            if task_configurations:
+                backup_hours = int(task_configurations[0][0])
+                backup_minutes = int(task_configurations[0][1])
+                scheduled = True  # Mark the backup as resumed
 
             # Show message for selected spinbox value
             selected_value = spinbox_var.get()
-            if selected_value > 0:  # Ensure a valid value is selected
+            if selected_value > 0:
                 messagebox.showinfo("Cantidad seleccionada", f"Cantidad de respaldos a borrar: {selected_value}")
+            else:
+                raise ValueError("El valor de respaldos a borrar debe ser mayor que 0.")
 
             # Update the destination path in the main interface
-            parent_window.update_idletasks()  # Ensure changes are reflected
+            folder_path = rounded_label.cget("text").replace("Destino: ", "")
+            if not folder_path:
+                raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
+            parent_window.update_idletasks()
             rounded_label.configure(text=f"Destino: {folder_path}")
 
             messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
-            root.destroy()  # Close the current window
-            parent_window.deiconify()  # Re-enable the main window
+            root.destroy()
+            parent_window.deiconify()
 
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
-            root.destroy()  # Close the current window in case of error
-            parent_window.deiconify()  # Re-enable the parent window
+            root.destroy()
+            parent_window.deiconify()
+        except Exception as e:
+            print(f"An error occurred in save_advanced_settings: {e}")
 
     save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings, fg_color="green")
-    save_button.pack(side="bottom", pady=5)  # Move the button to the bottom
+    save_button.pack(side="bottom", pady=5)
 
-    # Detectar el cierre de la ventana
     def on_closing():
         global app_running
         app_running = False
-        root.destroy()  # Cierra la ventana actual
-        parent_window.deiconify()  # Rehabilita la ventana padre
-
+        root.destroy()
+        parent_window.deiconify()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
