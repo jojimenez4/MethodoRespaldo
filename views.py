@@ -5,7 +5,7 @@ import threading
 import schedule
 import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk, Spinbox
-from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
+from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY, login_to_onedrive
 from PIL import Image, ImageTk  # Import PIL for image handling
 from customtkinter import CTkImage  # Import CTkImage for handling images
 
@@ -181,6 +181,7 @@ def create_server_interface():
     
 # wea pa comprimir con contraseña
 
+
 def open_file_interface(parent_window):
     parent_window.withdraw()  # Hide the parent window
     file_window = customtkinter.CTk()
@@ -208,7 +209,7 @@ def open_file_interface(parent_window):
             file_label.configure(text="Archivo no seleccionado")  # Mostrar mensaje si no se selecciona archivo
     
     # Button to browse for a file
-    browse_button = customtkinter.CTkButton(frame, text="Buscar Archivo", command=select_file, fg_color="green")
+    browse_button = customtkinter.CTkButton(frame, text=" Buscar Archivo", command=select_file, fg_color="green")
     browse_button.pack(pady=10)
 
     # Function to insert the file with a password
@@ -252,6 +253,10 @@ def open_backup_interface(server_data=None):
 
     eye_button = customtkinter.CTkButton(frame, text="👁", width=30, command=lambda: open_file_interface(root), fg_color="blue")
     eye_button.pack(pady=10, padx=10, anchor="ne")
+
+    # Modify the cloud button to initiate OneDrive login
+    cloud_button = customtkinter.CTkButton(frame, text="☁", width=30, command=login_to_onedrive, fg_color="gray")
+    cloud_button.pack(pady=10, padx=10, anchor="ne")
 
     def update_label():
         folder = filedialog.askdirectory()
@@ -438,7 +443,6 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
     # Lista para almacenar las tareas adicionales
     additional_tasks = []
 
-
     def add_task():
         if len(additional_tasks) >= 2:  # Máximo 2 tareas adicionales
             messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
@@ -468,12 +472,6 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
         # Insertar la tarea en el frame
         task_frame.pack(pady=5, padx=10, fill="x")
 
-        # Mover el Spinbox y el botón de guardar hacia abajo
-        spinbox_frame.pack_forget()
-        save_button.pack_forget()
-        spinbox_frame.pack(pady=10, after=task_frame)
-        save_button.pack(pady=20)
-
         # Agregar la tarea a la lista
         additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
 
@@ -483,12 +481,6 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
                 additional_tasks.remove(task)
                 task_frame.destroy()
                 break
-
-        # Reajustar la posición del Spinbox y el botón de guardar
-        spinbox_frame.pack_forget()
-        save_button.pack_forget()
-        spinbox_frame.pack(pady=10)
-        save_button.pack(pady=20)
 
     # Botón para agregar tareas adicionales
     add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
@@ -512,15 +504,18 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
     minute_combobox.set("00")  # Valor predeterminado
     minute_combobox.pack(side="left", padx=(5, 5))  # Ajustar padding
 
-        # Centrar el texto dentro del combobox
+    # Centrar el texto dentro del combobox
     hour_combobox.configure(justify="center")
     minute_combobox.configure(justify="center")
 
-    spinbox_var = customtkinter.IntVar(value=1)
-
     # Frame para el Spinbox
+    spinbox_var = customtkinter.IntVar(value=1)
     spinbox_frame = customtkinter.CTkFrame(frame)
-    spinbox_frame.pack(pady=10)
+    spinbox_frame.pack(pady=10, side="bottom")
+
+    # Agregar un texto al lado izquierdo del Spinbox
+    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Borrar respaldos:")
+    delete_label.pack(side="left", padx=5)
 
     numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
     numeric_entry.pack(side="left", padx=5)
@@ -532,11 +527,6 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
             numeric_entry.delete(0, "end")
             numeric_entry.insert(0, str(spinbox_var.get()))
 
-
-
-    
-
-
     decrease_button = customtkinter.CTkButton(spinbox_frame, text="-", width=30, command=decrease_value, fg_color="red")
     decrease_button.pack(side="left", padx=5)
 
@@ -547,12 +537,8 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
             numeric_entry.delete(0, "end")
             numeric_entry.insert(0, str(spinbox_var.get()))
 
-            
-    
     increase_button = customtkinter.CTkButton(spinbox_frame, text="+", width=30, command=increase_value, fg_color="green")
     increase_button.pack(side="right", padx=0)
-
-
 
     def save_advanced_settings():
         global scheduled, scheduled_backup_thread, app_running  # Access global variables
@@ -613,7 +599,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
             parent_window.deiconify()  # Re-enable the parent window
 
     save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings, fg_color="green")
-    save_button.pack(pady=20)
+    save_button.pack(side="bottom", pady=5)  # Move the button to the bottom
 
     # Detectar el cierre de la ventana
     def on_closing():

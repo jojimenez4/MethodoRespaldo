@@ -10,6 +10,9 @@ import mysql.connector.locales.eng.client_error
 from Crypto.Cipher import AES
 from Crypto import Random
 from Crypto.Hash import SHA256
+import webbrowser
+from msal import PublicClientApplication
+from tkinter import messagebox
 
 dotenv.load_dotenv()
 
@@ -167,4 +170,29 @@ def send_email(message):
     except Exception as e:
         print(f"Error occurred while sending email: {e}")
     return True
+
+def login_to_onedrive():
+    """Log in to OneDrive using Microsoft Graph API."""
+    client_id = os.getenv("ONEDRIVE_CLIENT_ID")
+    authority = "https://login.microsoftonline.com/common"
+    scopes = ["Files.ReadWrite", "User.Read"]
+
+    try:
+        app = PublicClientApplication(client_id, authority=authority)
+        flow = app.initiate_device_flow(scopes=scopes)
+        if "user_code" not in flow:
+            raise ValueError("Failed to create device flow. Check your client ID and permissions.")
+
+        # Display the user code and open the login URL
+        messagebox.showinfo("OneDrive Login", f"Go to {flow['verification_uri']} and enter the code: {flow['user_code']}")
+        webbrowser.open(flow["verification_uri"])
+
+        # Acquire token interactively
+        result = app.acquire_token_by_device_flow(flow)
+        if "access_token" in result:
+            messagebox.showinfo("Success", "Successfully logged in to OneDrive!")
+        else:
+            raise ValueError("Failed to log in to OneDrive. Please try again.")
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred during OneDrive login: {e}")
 
