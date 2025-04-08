@@ -255,16 +255,39 @@ def open_backup_interface(server_data=None):
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
-    history_button = customtkinter.CTkButton(frame, text="⟳", width=30, command=lambda: show_backup_history(), fg_color="green")
-    history_button.pack(pady=10, padx=10, anchor="ne")
+    # Load the Methodo logo
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    logo_path = os.path.join(base_dir, "assets", "METHODO.png")
+    logo_image = Image.open(logo_path)
+    logo_ctk_image = CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))
 
-    eye_button = customtkinter.CTkButton(frame, text="👁", width=30, command=lambda: open_file_interface(root), fg_color="blue")
-    eye_button.pack(pady=10, padx=10, anchor="ne")
+    # Create a horizontal frame for the logo and buttons
+    top_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
+    top_frame.pack(pady=10, padx=10, fill="x")
 
-    # Modify the cloud button to initiate OneDrive login
-    cloud_button = customtkinter.CTkButton(frame, text="☁", width=30, fg_color="gray")
-    cloud_button.pack(pady=10, padx=10, anchor="ne")
+    # Add the Methodo logo to the left
+    logo_label = customtkinter.CTkLabel(top_frame, image=logo_ctk_image, text="")
+    logo_label.pack(side="left", padx=50)
 
+    # Add the buttons to the right of the logo
+    buttons_frame = customtkinter.CTkFrame(top_frame, fg_color="transparent")
+    buttons_frame.pack(side="right", padx=10)
+
+    history_button = customtkinter.CTkButton(buttons_frame, text="⟳ Historial", width=30, command=lambda: show_backup_history(), fg_color="green")
+    history_button.pack(pady=5, anchor="e")
+
+    eye_button = customtkinter.CTkButton(buttons_frame, text="👁 Desencriptar", width=30, command=lambda: open_file_interface(root), fg_color="blue")
+    eye_button.pack(pady=5, anchor="e")
+
+    cloud_button = customtkinter.CTkButton(buttons_frame, text="☁ Cloud", width=30, fg_color="gray")
+    cloud_button.pack(pady=5, anchor="e")
+
+    # Add the "Configuración avanzada" button
+    advanced_settings_button = customtkinter.CTkButton(buttons_frame, text="⚙ Configuración avanzada", command=lambda: open_advance_options(root, rounded_label, server_data), 
+fg_color="orange", width=150)
+    advanced_settings_button.pack(pady=5, anchor="e")
+
+    # Replace the "Seleccionar Carpeta" button with a magnifying glass logo
     def update_label():
         folder = filedialog.askdirectory()
         if folder:
@@ -274,106 +297,80 @@ def open_backup_interface(server_data=None):
             messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
             return ""
 
-    folder_button = customtkinter.CTkButton(frame, text="Seleccionar Carpeta", command=update_label, fg_color="green")
-    folder_button.pack(pady=5)
+    # Load the magnifying glass logo
+    lupa_path = os.path.join(base_dir, "assets", "lupa.png")
+    lupa_image = Image.open(lupa_path)
+    lupa_ctk_image = CTkImage(light_image=lupa_image, dark_image=lupa_image, size=(30, 30))
 
-    result_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=30)
-    result_label.pack(pady=0)
+    # Add the lupa button and label below the logo
+    lupa_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
+    lupa_frame.pack(pady=10, padx=10, fill="x")
 
-    date_frame = customtkinter.CTkFrame(frame)
-    date_frame.pack(pady=5, padx=5, fill="x", expand=True)
+    lupa_button = customtkinter.CTkButton(lupa_frame, image=lupa_ctk_image, text="", command=update_label, fg_color="green", width=120, height=32)
+    lupa_button.pack(side="left", padx=5)
 
-    rounded_label = customtkinter.CTkLabel(date_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=40)
-    rounded_label.pack(pady=5, fill="x", expand=True)
+    rounded_label = customtkinter.CTkLabel(lupa_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=30)
+    rounded_label.pack(side="left", padx=5, fill="x", expand=True)
 
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green")
+    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data), fg_color="green", width=120, height=32)
     execute_button.pack(pady=10)
 
     scheduled = None
 
     def execute_backup(folder, server_data):
-        global app_running
-        nonlocal scheduled
+        global app_running, backup_hours, backup_minutes
         folder_path = folder.replace("Destino: ", "")
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
 
-        # Add a flag to track if the progress bar has been shown
-        first_execution = not hasattr(execute_backup, "progress_shown")
-        if first_execution:
-            execute_backup.progress_shown = True  # Set the flag
+        progress_window = None  # Initialize progress_window as None
 
-        if first_execution:  # Show progress bar only on the first execution
-            progress_window = customtkinter.CTkToplevel(root)
-            progress_window.title("Realizando Respaldo")
-            progress_window.geometry("300x100")
-            progress_window.overrideredirect(True)
+        def update_progress(value, text):
+            if progress_window and progress_window.winfo_exists():
+                progressbar['value'] = value
+                progress_label.configure(text=text)
+                progress_window.update_idletasks()
 
-            progress_window.update_idletasks()
-            screen_width = progress_window.winfo_screenwidth()
-            screen_height = progress_window.winfo_screenheight()
-            window_width = 300
-            window_height = 100
-            x = (screen_width // 2) - (window_width // 2)
-            y = (screen_height // 2) - (window_height // 2)
-            progress_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-            progress_window.grab_set()
-
-            progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
-            progressbar.pack(pady=10, padx=10)
-
-            progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
-            progress_label.pack(pady=5)
-
-            def update_progress(value, text):
-                if app_running and progress_window.winfo_exists():
-                    progressbar['value'] = value
-                    progress_label.configure(text=text)
-                    progress_window.update_idletasks()
-        else:
-            def update_progress(value, text):
-                pass  # Do nothing if not the first execution
-
-        try:
-            if server_data is None:
-                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
-                if first_execution and progress_window.winfo_exists():
+        def backup_with_progress():
+            nonlocal progress_window
+            try:
+                if server_data is None:
+                    raise ValueError("No se recibieron los datos del servidor.")
+                if server_data[0] == "MySQL Server (TCP/IP)":
+                    backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
+                    update_progress(100, "Respaldo completado.")
+                else:
+                    raise ValueError("Tipo de servidor no soportado.")
+            except Exception as e:
+                if progress_window and progress_window.winfo_exists():
+                    messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+            finally:
+                if progress_window and progress_window.winfo_exists():
                     progress_window.destroy()
-                return
-            if server_data[0] == "MySQL Server (TCP/IP)":
-                def backup_with_progress():
-                    try:
-                        backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
-                        if first_execution:
-                            update_progress(100, "Respaldo completado.")
-                    except Exception as e:
-                        if first_execution and progress_window.winfo_exists():
-                            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-                    finally:
-                        if first_execution and progress_window.winfo_exists():
-                            progress_window.destroy()
 
-                threading.Thread(target=backup_with_progress, daemon=True).start()
-            else:
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
-                if first_execution and progress_window.winfo_exists():
-                    progress_window.destroy()
-        except Exception as e:
-            if first_execution and progress_window.winfo_exists():
-                messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            if first_execution and progress_window.winfo_exists():
-                progress_window.destroy()
+        # Create progress window
+        progress_window = customtkinter.CTkToplevel(root)
+        progress_window.title("Realizando Respaldo")
+        progress_window.geometry("300x100")
+        center_window(progress_window, 300, 100)  # Center the progress window
 
+        progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
+        progressbar.pack(pady=10, padx=10)
+
+        progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
+        progress_label.pack(pady=5)
+
+        threading.Thread(target=backup_with_progress, daemon=True).start()
+
+        # Schedule automatic backups
         def schedule_backup():
-            global backup_hours, backup_minutes
             if backup_hours is None or backup_minutes is None:
                 messagebox.showerror("Error", "No se ha configurado el tiempo de respaldo automático.")
                 return
 
             interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-            schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data, show_progress=False)
+            schedule.every(interval_seconds).seconds.do(execute_programed_backup, folder_path, server_data=server_data)
 
             messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
 
@@ -384,9 +381,7 @@ def open_backup_interface(server_data=None):
 
             threading.Thread(target=run_schedule, daemon=True).start()
 
-        if not scheduled:
-            scheduled = True
-            threading.Thread(target=schedule_backup, daemon=True).start()
+        schedule_backup()
 
     def execute_programed_backup(folder_path, server_data, show_progress=False):
         try:
@@ -398,7 +393,7 @@ def open_backup_interface(server_data=None):
                 progress_window = customtkinter.CTkToplevel()
                 progress_window.title("Respaldo Automático")
                 progress_window.geometry("300x100")
-                progress_window.overrideredirect(True)
+                center_window(progress_window, 300, 100)  # Center the progress window
 
                 progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
                 progressbar.pack(pady=10, padx=10)
@@ -436,19 +431,8 @@ def open_backup_interface(server_data=None):
         except Exception as e:
             if show_progress:
                 messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-
-    advanced_settings_link = customtkinter.CTkLabel(frame, text="Configuración avanzada", text_color="green", font=("Arial", 12), cursor="hand2", width=30)
-    advanced_settings_link.pack(pady=10)
-    advanced_settings_link.bind("<Button-1>", lambda e: open_advance_options(root, rounded_label, server_data))
-
-    def on_enter(event):
-        advanced_settings_link.configure(text_color="deep sky blue")
-
-    def on_leave(event):
-        advanced_settings_link.configure(text_color="green")
-
-    advanced_settings_link.bind("<Enter>", on_enter)
-    advanced_settings_link.bind("<Leave>", on_leave)
+            if progress_window and progress_window.winfo_exists():
+                progress_window.destroy()
 
     def show_backup_history():
         try:
@@ -629,7 +613,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):  # Add
             if task_configurations:
                 backup_hours = int(task_configurations[0][0])
                 backup_minutes = int(task_configurations[0][1])
-                scheduled = True  # Mark the backup as resumed
+                scheduled = True
 
             # Show message for selected spinbox value
             selected_value = spinbox_var.get()
