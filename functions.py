@@ -76,7 +76,7 @@ def bd_connect_mysql(host, port, password):
         print(f"Error during SQL Server server verification: {err}")
         return False
     
-def backup_mysql_database(password, backup_dir, client, update_callback=None):
+def backup_mysql_database(password, backup_dir, client, amount, update_callback=None):
     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
     timestamp_email = timestamp[:4] + "-" + timestamp[4:6] + "-" + timestamp[6:8] + " " + timestamp[8:10] + ":" + timestamp[10:12]
     decrypted_password = decrypt(KEY, password).decode("utf-8")
@@ -129,6 +129,7 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
                 Mesa de ayuda Methodo.
                 """
         send_email(client, message)
+        max_backups(backup_dir, amount)
     except subprocess.CalledProcessError as e:
         send_email(client, f"Error ocurrido al respaldar datos: {e}")
     except OSError as e:
@@ -154,3 +155,16 @@ def send_email(client, message):
     except Exception as e:
         print(f"Error occurred while sending email: {e}")
     return True
+
+def max_backups(backup_dir, amount):
+    try:
+        files = os.listdir(backup_dir)
+        files = [f for f in files if f.endswith(".7z")]
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(backup_dir, x)), reverse=True)
+        if len(files) > amount:
+            for file in files[amount:]:
+                os.remove(os.path.join(backup_dir, file))
+        return True
+    except Exception as e:
+        print(f"Error occurred while managing backups: {e}")
+        return False

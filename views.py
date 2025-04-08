@@ -7,18 +7,17 @@ import schedule
 import customtkinter
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from PIL import Image
-from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, KEY
+from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, max_backups, KEY
 
 customtkinter.set_appearance_mode("dark") 
 
 app_running = True
-
 task_configurations = []
-
 backup_hours = None
 backup_minutes = None
 scheduled = False
 scheduled_backup_thread = None
+selected_amount = 0
 
 def center_window(window, width, height):
     """Centrar una ventana en la pantalla."""
@@ -58,7 +57,7 @@ def create_login_interface():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     logo_path = os.path.join(base_dir, "assets", "METHODO.png")
     logo_image = Image.open(logo_path)
-    logo_ctk_image = CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))
+    logo_ctk_image = customtkinter.CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))
     logo_label = customtkinter.CTkLabel(frame, image=logo_ctk_image, text="")
     logo_label.pack(pady=0)
     
@@ -168,7 +167,6 @@ def create_server_interface():
     server_window.mainloop()
     
 def open_file_interface(parent_window):
-    parent_window.withdraw()
     file_window = customtkinter.CTk()
     file_window.title("Desencriptar")
     center_window(file_window, 400, 300)
@@ -183,7 +181,7 @@ def open_file_interface(parent_window):
     file_label.pack(fill="x", expand=True)
 
     def select_file():
-        file_path = filedialog.askopenfilename(filetypes=[("RAR Files", "*.rar")])
+        file_path = filedialog.askopenfilename(filetypes=[("7-Zip Files", "*.7z"), ("All Files", "*.*")])
         if file_path:
             file_label.configure(text=f"Archivo: {file_path}")
         else:
@@ -215,7 +213,7 @@ def open_file_interface(parent_window):
     file_window.mainloop()
 
 def open_backup_interface(server_data=None):
-    global app_running, backup_hours, backup_minutes
+    global app_running, backup_hours, backup_minutes, selected_amount
     root = customtkinter.CTk()
     root.title("Respaldo local")
     center_window(root, 600, 400)
@@ -243,7 +241,7 @@ def open_backup_interface(server_data=None):
     eye_button = customtkinter.CTkButton(buttons_frame, text="👁 Desencriptar", width=30, command=lambda: open_file_interface(root), fg_color="RoyalBlue1")
     eye_button.pack(pady=5, anchor="e")
 
-    advanced_settings_button = customtkinter.CTkButton(buttons_frame, text="⚙ Configuración avanzada", command=lambda: open_advance_options(root, rounded_label, server_data), fg_color="DarkOrange3", width=150)
+    advanced_settings_button = customtkinter.CTkButton(buttons_frame, text="⚙ Configuración avanzada", command=lambda: open_advance_options(root, rounded_label), fg_color="DarkOrange3", width=150)
     advanced_settings_button.pack(pady=5, anchor="e")
 
     def update_label():
@@ -307,7 +305,7 @@ def open_backup_interface(server_data=None):
             if server_data[0] == "MySQL Server (TCP/IP)":
                 def backup_with_progress():
                     try:
-                        backup_mysql_database(server_data[3], folder_path, server_data[4], update_callback=update_progress)
+                        backup_mysql_database(server_data[3], folder_path, server_data[4], selected_amount, update_callback=update_progress)
                         update_progress(100, "Respaldo completado.")
                         messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
                         if backup_hours or backup_minutes:
@@ -346,7 +344,7 @@ def open_backup_interface(server_data=None):
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
             if server_data[0] == "MySQL Server (TCP/IP)":
-                backup_mysql_database(server_data[3], folder_path, server_data[4])
+                backup_mysql_database(server_data[3], folder_path, server_data[4], selected_amount)
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
@@ -363,7 +361,7 @@ def open_backup_interface(server_data=None):
             if not os.path.exists(backup_dir):
                 raise ValueError("El directorio de respaldos no existe.")
             backup_files = [
-                entry.path for entry in os.scandir(backup_dir) if entry.is_file() and entry.name.endswith(".rar")
+                entry.path for entry in os.scandir(backup_dir) if entry.is_file() and entry.name.endswith(".7z")
             ]
             if not backup_files:
                 raise ValueError("No hay respaldos disponibles.")
@@ -386,7 +384,7 @@ def open_backup_interface(server_data=None):
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
-def open_advance_options(parent_window, rounded_label, server_data=None):
+def open_advance_options(parent_window, rounded_label):
     global scheduled, scheduled_backup_thread, task_configurations, backup_hours, backup_minutes
 
     if scheduled:
@@ -395,7 +393,6 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
             return
         scheduled = False
 
-    parent_window.withdraw()
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     center_window(root, 500, 500)
@@ -403,7 +400,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=20, padx=60, fill="both")
 
-    autorespaldos_label = customtkinter.CTkLabel(frame, text="Auto respaldos", font=("Arial", 14, "bold"))
+    autorespaldos_label = customtkinter.CTkLabel(frame, text="Respaldo Automático", font=("Arial", 14, "bold"))
     autorespaldos_label.pack(pady=5)
 
     tasks_frame = customtkinter.CTkFrame(frame)
@@ -467,11 +464,11 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
     for hour, minute in task_configurations:
         add_task(hour, minute)
 
-    spinbox_var = customtkinter.IntVar(value=1)
+    spinbox_var = customtkinter.IntVar(value=0)
     spinbox_frame = customtkinter.CTkFrame(frame)
     spinbox_frame.pack(pady=10, side="bottom")
 
-    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Borrar respaldos:")
+    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Cantidad max respaldos:")
     delete_label.pack(side="left", padx=5)
 
     numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
@@ -498,7 +495,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
     increase_button.pack(side="right", padx=0)
 
     def save_advanced_settings():
-        global scheduled, scheduled_backup_thread, app_running, task_configurations, backup_hours, backup_minutes
+        global scheduled, scheduled_backup_thread, app_running, task_configurations, backup_hours, backup_minutes, selected_amount
         try:
             task_configurations.clear()
             for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
@@ -513,9 +510,9 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
                 backup_minutes = int(task_configurations[0][1])
                 scheduled = True
 
-            selected_value = spinbox_var.get()
-            if selected_value > 0:
-                messagebox.showinfo("Cantidad seleccionada", f"Cantidad de respaldos a borrar: {selected_value}")
+            selected_amount = spinbox_var.get()
+            if selected_amount > 0:
+                messagebox.showinfo("Info", f"Cantidad de respaldos máximos en carpeta: {selected_amount}")
             else:
                 raise ValueError("El valor de respaldos a borrar debe ser mayor que 0.")
 
@@ -525,7 +522,7 @@ def open_advance_options(parent_window, rounded_label, server_data=None):
             parent_window.update_idletasks()
             rounded_label.configure(text=f"Destino: {folder_path}")
 
-            messagebox.showinfo("Configuración Guardada", "Configuración avanzada guardada correctamente.")
+            messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
             root.destroy()
             parent_window.deiconify()
 
