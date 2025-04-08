@@ -10,9 +10,6 @@ import smtplib
 from Crypto.Cipher import AES
 from Crypto import Random
 from Crypto.Hash import SHA256
-import webbrowser
-from msal import PublicClientApplication
-from tkinter import messagebox
 
 dotenv.load_dotenv()
 
@@ -87,16 +84,16 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
         client = client.replace(" ", "_")
     device = socket.gethostname()
     backup_file_name = f"{client}_{device}_backup_{timestamp}.txt"
-    rar_file_name = f"{client}_{device}_backup_{timestamp}.rar"
+    seven_zip_file_name = f"{client}_{device}_backup_{timestamp}.7z"
     
     mysql_bin_path = "C:\\mysql\\bin"
-    rar_path = "C:\\WinRAR"
+    seven_zip_path = "C:\\7-Zip"
 
     command = f'mysqldump -e -R -u root -p{decrypted_password} {DATABASE} > "{backup_file_name}"'
-    move_command = f'move {backup_file_name} {rar_path}'
-    comprimir_command = f'"rar" a -p {rar_file_name} {backup_file_name}"'
+    move_command = f'move {backup_file_name} "{seven_zip_path}"'
+    comprimir_command = f'"{seven_zip_path}\\7z.exe" a -p"{BACKUP_PASSWORD}" "{seven_zip_file_name}" "{backup_file_name}"'
     delete_txt = f'del {backup_file_name}'
-    move_command2 = f'move {rar_file_name} {backup_dir}'
+    move_command2 = f'move "{seven_zip_file_name}" "{backup_dir}"'
 
     try:
         os.chdir(mysql_bin_path)
@@ -107,14 +104,14 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
             update_callback(30, "Moviendo archivo temporal...")
         subprocess.run(move_command, shell=True, check=True)
 
-        os.chdir(rar_path)
+        os.chdir(seven_zip_path)
         if update_callback:
             update_callback(50, "Comprimiendo respaldo...")     
-        rar_process = subprocess.run(comprimir_command, shell=True, input=BACKUP_PASSWORD, capture_output=True, text=True)
-        if rar_process.returncode != 0:
-            print(f"RAR Output: {rar_process.stdout}")
-            print(f"RAR Error: {rar_process.stderr}")
-            raise subprocess.CalledProcessError(rar_process.returncode, comprimir_command)
+        seven_zip_process = subprocess.run(comprimir_command, shell=True, capture_output=True, text=True)
+        if seven_zip_process.returncode != 0:
+            print(f"7-Zip Output: {seven_zip_process.stdout}")
+            print(f"7-Zip Error: {seven_zip_process.stderr}")
+            raise subprocess.CalledProcessError(seven_zip_process.returncode, comprimir_command)
 
         if update_callback:
             update_callback(70, "Eliminando archivo temporal...")
@@ -138,18 +135,6 @@ def backup_mysql_database(password, backup_dir, client, update_callback=None):
         send_email(client, f"Error ocurrido al respaldar datos: {e}")
     except Exception as e:
         send_email(client, f"Error inesperado: {e}")
-    
-# # def backup_sql_server_database(server, user, password, dbname, backup_dir):
-#     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-#     backup_file = os.path.join(backup_dir, f"{dbname}_backup_{timestamp}.bak")
-#     command = f"sqlcmd -S {server} -U {user} -P {password} -Q \"BACKUP DATABASE [{dbname}] TO DISK='{backup_file}'\""
-#     try:
-#         subprocess.run(command, shell=True, check=True)
-#         print(f"Backup of SQL Server database '{dbname}' completed successfully.")
-#     except subprocess.CalledProcessError as e:
-#         print(f"Error occurred while backing up SQL Server database: {e}")
-#     except Exception as e:
-#         print(f"An unexpected error occurred: {e}")
 
 def send_email(client, message):
     receiver_email = "jose.jimenez@methodo.cl"
@@ -169,32 +154,3 @@ def send_email(client, message):
     except Exception as e:
         print(f"Error occurred while sending email: {e}")
     return True
-
-
-# wea pa iniciar con cloud F
-
-    # def login_to_onedrive():
-    # """Log in to OneDrive using Microsoft Graph API."""
-    # client_id = os.getenv("ONEDRIVE_CLIENT_ID")
-    # authority = "https://login.microsoftonline.com/common"
-    # scopes = ["Files.ReadWrite", "User.Read"]
-
-    # try:
-    #     app = PublicClientApplication(client_id, authority=authority)
-    #     flow = app.initiate_device_flow(scopes=scopes)
-    #     if "user_code" not in flow:
-    #         raise ValueError("Failed to create device flow. Check your client ID and permissions.")
-
-    #     # Display the user code and open the login URL
-    #     messagebox.showinfo("OneDrive Login", f"Go to {flow['verification_uri']} and enter the code: {flow['user_code']}")
-    #     webbrowser.open(flow["verification_uri"])
-
-    #     # Acquire token interactively
-    #     result = app.acquire_token_by_device_flow(flow)
-    #     if "access_token" in result:
-    #         messagebox.showinfo("Success", "Successfully logged in to OneDrive!")
-    #     else:
-    #         raise ValueError("Failed to log in to OneDrive. Please try again.")
-    # except Exception as e:
-    #     messagebox.showerror("Error", f"An error occurred during OneDrive login: {e}")
-
