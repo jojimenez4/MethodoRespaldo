@@ -1,7 +1,7 @@
 import logging
 import sys
 from pathlib import Path
-from functions import save_state, load_state, program_state, STATUS_PROGRAM
+from functions import save_state, program_state, STATUS_PROGRAM
 from views import create_login_interface
 
 # Configurar logging
