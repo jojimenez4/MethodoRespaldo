@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os    
 import datetime
 import subprocess
@@ -8,21 +9,50 @@ import customtkinter
 import pystray
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from PIL import Image
-from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, save_state, program_state, server_data_state, KEY, STATUS_PROGRAM, SERVER_DATA
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any, Callable
+import logging
 
+from functions import (
+    encrypt, bd_connect_mysql, send_email, backup_mysql_database, 
+    save_state, program_state, server_data_state, KEY, STATUS_PROGRAM, 
+    SERVER_DATA, decrypt_backup_file, logger
+)
+
+# Configurar apariencia inicial
 customtkinter.set_appearance_mode("dark") 
 
-app_running = True
-task_configurations = []
-backup_hours = None
-backup_minutes = None
-scheduled = False
-scheduled_backup_thread = None
-selected_amount = 0
-app_icon = None
-root_window = None
+# Variables de estado
+class AppState:
+    running: bool = True
+    task_configurations: List[Tuple[str, str]] = []
+    backup_hours: Optional[int] = None
+    backup_minutes: Optional[int] = None
+    scheduled: bool = False
+    scheduled_backup_thread: Optional[threading.Thread] = None
+    selected_amount: int = 0
+    app_icon: Optional[Any] = None
+    root_window: Optional[customtkinter.CTk] = None
+    _lock = threading.Lock()  # Para operaciones thread-safe
+    
+    @classmethod
+    def set_amount(cls, amount: int) -> None:
+        with cls._lock:
+            cls.selected_amount = amount
+    
+    @classmethod
+    def set_scheduled(cls, value: bool) -> None:
+        with cls._lock:
+            cls.scheduled = value
+    
+    @classmethod
+    def set_backup_time(cls, hours: int, minutes: int) -> None:
+        with cls._lock:
+            cls.backup_hours = hours
+            cls.backup_minutes = minutes
 
-def center_window(window, width, height):
+# Funciones de utilidad
+def center_window(window: customtkinter.CTk, width: int, height: int) -> None:
     """Centrar una ventana en la pantalla."""
     screen_width = window.winfo_screenwidth()
     screen_height = window.winfo_screenheight()
@@ -30,105 +60,146 @@ def center_window(window, width, height):
     y = (screen_height // 2) - (height // 2)
     window.geometry(f"{width}x{height}+{x}+{y}")
 
-def create_login_interface():
-    global app_running
-    login_window = customtkinter.CTk()
-    login_window.title("Login")
-    center_window(login_window, 400, 500)
+def load_app_image(filename: str) -> Image.Image:
+    """Carga una imagen desde el directorio de assets."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    image_path = os.path.join(base_dir, "assets", filename)
+    
+    # Verificar si la imagen existe
+    if not os.path.exists(image_path):
+        logger.warning(f"Imagen no encontrada: {image_path}")
+        # Crear una imagen en blanco si no se encuentra
+        return Image.new('RGB', (200, 200), color='gray')
+    
+    return Image.open(image_path)
 
+# Interfaz de login
+def create_login_interface() -> None:
+    """Crea la interfaz de inicio de sesión."""
+    login_window = customtkinter.CTk()
+    login_window.title("Login - Sistema de Respaldo")
+    center_window(login_window, 400, 600)
+
+    # Variable para el modo oscuro/claro
     switch = customtkinter.StringVar(value="dark")
 
-    def switch_mode():
+    def switch_mode() -> None:
+        """Cambia entre modo oscuro y claro."""
         if switch.get() == "dark":
             customtkinter.set_appearance_mode("light")
-            button.configure(text="claro")
+            button.configure(text="Modo claro")
             switch.set("light")
         else:
-            def initialize_appearance():
-                customtkinter.set_appearance_mode("dark")
-            
-            initialize_appearance()
-            button.configure(text="oscuro")
+            customtkinter.set_appearance_mode("dark")
+            button.configure(text="Modo oscuro")
             switch.set("dark")
 
+    # Marco principal
     frame = customtkinter.CTkFrame(login_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-    button = customtkinter.CTkSwitch(frame, command=switch_mode, text="oscuro")
+    # Botón de cambio de tema
+    button = customtkinter.CTkSwitch(frame, command=switch_mode, text="Modo oscuro")
     button.pack(pady=10, padx=10, anchor="ne")
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    logo_path = os.path.join(base_dir, "assets", "METHODO.png")
-    logo_image = Image.open(logo_path)
+    # Logo
+    logo_image = load_app_image("METHODO.png")
     logo_ctk_image = customtkinter.CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))
     logo_label = customtkinter.CTkLabel(frame, image=logo_ctk_image, text="")
-    logo_label.pack(pady=0)
+    logo_label.pack(pady=10)
     
+    # Campos de entrada
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
-    username_label.pack(pady=0)
+    username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
     username_entry.insert(0, "admin")
-    username_entry.pack(pady=0)
+    username_entry.pack(pady=5)
 
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
-    def verify_login():
+    # Verificación de credenciales
+    def verify_login() -> None:
+        """Verifica las credenciales de inicio de sesión."""
         username = username_entry.get()
         password = password_entry.get()
+        
+        # TODO: Implementar sistema de autenticación real
+        # En una aplicación de producción, deberíamos usar un sistema
+        # de autenticación más seguro, como bcrypt para hashear passwords
         if username == "admin" and password == "1234":
-            messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
+            logger.info(f"Inicio de sesión exitoso: usuario {username}")
             login_window.destroy()
-            if program_state["running"] == True:
-                server_type = server_data_state["server_type"]
+            
+            # Verificar si tenemos una sesión en curso
+            if program_state.get("running") == True:
+                server_type = server_data_state.get("server_type")
                 if server_type == "MySQL Server (TCP/IP)":
-                    host = server_data_state["host"]
-                    port = server_data_state["port"]
-                    password = server_data_state["password"]
-                    connectionBD = bd_connect_mysql(host, port, password)[1]
-                if connectionBD:
-                    open_backup_interface(server_data_state)
+                    host = server_data_state.get("host")
+                    port = server_data_state.get("port")
+                    password = server_data_state.get("password")
+                    
+                    # Verificar conexión
+                    connection_result = bd_connect_mysql(host, port, password)
+                    connection_success = connection_result[1]
+                    
+                    if connection_success:
+                        open_backup_interface(server_data_state)
+                    else:
+                        logger.error(f"Error de conexión a BD: {connection_result[0]}")
+                        messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+                        create_server_interface()
                 else:
-                    messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
                     create_server_interface()
             else:
                 create_server_interface()
         else:
+            logger.warning(f"Intento de inicio de sesión fallido: usuario {username}")
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
+    # Botón de inicio de sesión
     login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login, fg_color="green")
     login_button.pack(pady=20)
 
+    # Vincular tecla Enter para iniciar sesión
     password_entry.bind("<Return>", lambda event: verify_login())
 
-    def on_closing():
-        global app_running
-        app_running = False
+    # Manejo del cierre de la ventana
+    def on_closing() -> None:
+        AppState.running = False
         login_window.destroy()
 
     login_window.protocol("WM_DELETE_WINDOW", on_closing)
     login_window.mainloop()
 
-def create_server_interface():
-    global app_running
+# Interfaz de selección de servidor
+def create_server_interface() -> None:
+    """Crea la interfaz para conectar al servidor de base de datos."""
     server_window = customtkinter.CTk() 
-    server_window.title("Conectar al Servidor MySQL")
+    server_window.title("Conectar al Servidor de Base de Datos")
     center_window(server_window, 800, 350)
 
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
+    # Selección de tipo de servidor
     server_type_label = customtkinter.CTkLabel(frame, text="Tipo de Servidor:", width=30)
     server_type_label.pack(pady=5)
-    server_type = customtkinter.CTkComboBox(frame, values=["Seleccionar Base de Datos", "MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], width=280)
+    server_type = customtkinter.CTkComboBox(
+        frame, 
+        values=["Seleccionar Base de Datos", "MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"], 
+        width=280
+    )
     server_type.set("Seleccionar Base de Datos")
     server_type.pack(pady=5)
 
+    # Frame para IP y puerto
     ip_port_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
     ip_port_frame.pack(pady=5, padx=5, fill="x")
 
+    # Campos de entrada para IP y puerto
     server_ip_label = customtkinter.CTkLabel(ip_port_frame, text="Dirección IP del Servidor:", width=30)
     server_ip_label.pack(side="left", pady=5, padx=(110, 0))
     server_ip_entry = customtkinter.CTkEntry(ip_port_frame)
@@ -141,178 +212,408 @@ def create_server_interface():
     port_entry.insert(0, "3306")
     port_entry.pack(side="left", pady=5, padx=(0, 10))
 
+    # Campo de contraseña
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
-    def verify_server():
+    # Verificación de conexión al servidor
+    def verify_server() -> None:
+        """Verifica la conexión al servidor seleccionado."""
         try:
-            host = server_ip_entry.get()
-            port = int(port_entry.get())
-            password = password_entry.get().encode("utf-8")
-            encrypted_password = encrypt(KEY, password)
+            host = server_ip_entry.get().strip()
+            
+            # Validaciones básicas
+            if not host:
+                raise ValueError("La dirección del servidor no puede estar vacía")
+                
+            try:
+                port = int(port_entry.get().strip())
+                if port <= 0 or port > 65535:
+                    raise ValueError("El puerto debe estar entre 1 y 65535")
+            except ValueError:
+                raise ValueError("El puerto debe ser un número entero válido")
+                
+            password = password_entry.get()
+            if not password:
+                raise ValueError("La contraseña no puede estar vacía")
+                
+            # Encriptar contraseña
+            encrypted_password = encrypt(KEY, password.encode("utf-8"))
             server_type_selected = server_type.get()
-            client = ""
+            
+            # Procesar según tipo de servidor
             if server_type_selected == "MySQL Server (TCP/IP)":
                 client, connection_success = bd_connect_mysql(host, port, encrypted_password)
+                
                 if connection_success:
-                    server_data_state["server_type"] = server_type_selected
-                    server_data_state["host"] = host
-                    server_data_state["port"] = port
-                    server_data_state["password"] = encrypted_password
-                    server_data_state["client"] = client
-                    save_state(SERVER_DATA, server_data_state)
+                    # Guardar configuración de conexión
+                    server_data = {
+                        "server_type": server_type_selected,
+                        "host": host,
+                        "port": port,
+                        "password": encrypted_password,
+                        "client": client,
+                        "last_connection": datetime.datetime.now().isoformat()
+                    }
+                    
+                    save_state(SERVER_DATA, server_data)
                     messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos MySQL. Cliente: {client}")
+                    
+                    logger.info(f"Conexión exitosa a MySQL: {host}:{port} - Cliente: {client}")
                     server_window.destroy()
-                    open_backup_interface(server_data_state)
+                    open_backup_interface(server_data)
                 else:
+                    logger.error(f"Error en conexión MySQL: {client}")
                     messagebox.showerror("Error", f"Error en la conexión a la base de datos MySQL: {client}")
-            # elif server_type_selected == "SQL Server (Windows Authentication)":
-            #     if f.bd_server_verify_sql_server(server_ip, username, encrypted_password):
-            #         messagebox.showinfo("Éxito", "Conexión exitosa a la base de datos SQL Server.")
-            #         server_window.destroy()
-            #         open_backup_interface(server_data)
-            #     else:
-            #         messagebox.showerror("Error", "Error en la conexión a la base de datos SQL Server.")
+            elif server_type_selected == "SQL Server (Windows Authentication)":
+                messagebox.showinfo("Información", "Funcionalidad para SQL Server en desarrollo.")
             else:
                 messagebox.showerror("Error", "No se ha seleccionado ninguna base de datos.")
+        except ValueError as ve:
+            messagebox.showerror("Error de validación", str(ve))
         except Exception as e:
+            logger.error(f"Error al conectar a la base de datos: {e}", exc_info=True)
             messagebox.showerror("Error", f"Error al conectar a la base de datos: {e}")
 
+    # Botón de conexión
     server_button = customtkinter.CTkButton(frame, text="Conectar", command=verify_server, fg_color="green")
     server_button.pack(pady=20)
 
+    # Vincular tecla Enter para conectar
     password_entry.bind("<Return>", lambda event: verify_server())
+    
     server_window.mainloop()
     
-def open_file_interface(parent_window):
+# Interfaz de desencriptación de archivos
+def open_file_interface(parent_window: customtkinter.CTk) -> None:
+    """Crea la interfaz para desencriptar archivos de respaldo."""
     file_window = customtkinter.CTk()
-    file_window.title("Desencriptar")
-    center_window(file_window, 400, 300)
+    file_window.title("Desencriptar Archivo de Respaldo")
+    center_window(file_window, 500, 400)
 
     frame = customtkinter.CTkFrame(file_window)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-    label = customtkinter.CTkLabel(frame, text="Selecciona el archivo a desencriptar", font=("Helvetica", 16), width=40)
-    label.pack(pady=5, padx=5)
+    # Título
+    label = customtkinter.CTkLabel(
+        frame, 
+        text="Desencriptar Archivo de Respaldo", 
+        font=("Helvetica", 18, "bold"), 
+        width=40
+    )
+    label.pack(pady=15, padx=5)
 
-    file_label = customtkinter.CTkLabel(frame, text="", font=("Arial", 12), width=40,corner_radius=10, fg_color="gray")
-    file_label.pack(fill="x", expand=True)
+    # Etiqueta para mostrar el archivo seleccionado
+    file_label = customtkinter.CTkLabel(
+        frame, 
+        text="Ningún archivo seleccionado", 
+        font=("Arial", 12), 
+        width=40,
+        corner_radius=10, 
+        fg_color="gray"
+    )
+    file_label.pack(pady=10, fill="x", expand=True)
 
-    def select_file():
-        file_path = filedialog.askopenfilename(filetypes=[("7-Zip Files", "*.7z"), ("All Files", "*.*")])
-        if file_path:
-            file_label.configure(text=f"Archivo: {file_path}")
+    # Variables para almacenar rutas
+    file_path = ""
+    output_dir = ""
+
+    # Selección de archivo
+    def select_file() -> None:
+        nonlocal file_path
+        selected_path = filedialog.askopenfilename(filetypes=[("7-Zip Files", "*.7z"), ("All Files", "*.*")])
+        if selected_path:
+            file_path = selected_path
+            file_label.configure(text=f"Archivo: {Path(selected_path).name}")
         else:
-            file_label.configure(text="Archivo no seleccionado")
+            file_path = ""
+            file_label.configure(text="Ningún archivo seleccionado")
     
-    browse_button = customtkinter.CTkButton(frame, text=" Buscar Archivo", command=select_file, fg_color="green")
+    browse_button = customtkinter.CTkButton(
+        frame, 
+        text="📂 Buscar Archivo", 
+        command=select_file, 
+        fg_color="green"
+    )
     browse_button.pack(pady=10)
 
-    def insert_file():
-        file_path = file_label.cget("text").replace("Archivo: ", "")
-        if not file_path or file_path == "Archivo no seleccionado":
-            messagebox.showerror("Error", "No se seleccionó ningún archivo.")
+    # Seleccionar carpeta destino
+    def select_output_dir() -> None:
+        nonlocal output_dir
+        selected_dir = filedialog.askdirectory()
+        if selected_dir:
+            output_dir = selected_dir
+            output_dir_label.configure(text=f"Destino: {Path(selected_dir).name}")
+        else:
+            output_dir = ""
+            output_dir_label.configure(text="Destino predeterminado")
+
+    output_dir_label = customtkinter.CTkLabel(
+        frame,
+        text="Destino predeterminado",
+        font=("Arial", 12),
+        width=40,
+        corner_radius=10,
+        fg_color="gray"
+    )
+    output_dir_label.pack(pady=10, fill="x", expand=True)
+
+    output_dir_button = customtkinter.CTkButton(
+        frame,
+        text="📁 Seleccionar Destino",
+        command=select_output_dir,
+        fg_color="blue"
+    )
+    output_dir_button.pack(pady=5)
+
+    # Desencriptar archivo
+    def decrypt_file() -> None:
+        nonlocal file_path, output_dir
+        
+        if not file_path:
+            messagebox.showerror("Error", "No se ha seleccionado ningún archivo.")
             return
 
-        password = simpledialog.askstring("Contraseña", "Ingrese una contraseña para el archivo:", show="*")
-        if password:
-            messagebox.showinfo("Éxito", f"Archivo '{file_path}' protegido con contraseña.")
-        else:
+        # Solicitar contraseña
+        password = simpledialog.askstring(
+            "Contraseña", 
+            "Ingrese la contraseña del archivo:", 
+            show="*"
+        )
+        
+        if not password:
             messagebox.showerror("Error", "No se ingresó ninguna contraseña.")
+            return
+            
+        # Mostrar ventana de progreso
+        progress_window = customtkinter.CTkToplevel(file_window)
+        progress_window.title("Desencriptando")
+        center_window(progress_window, 300, 100)
+        progress_frame = customtkinter.CTkFrame(progress_window)
+        progress_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        progress_label = customtkinter.CTkLabel(progress_frame, text="Desencriptando archivo...")
+        progress_label.pack(pady=10)
+        progress_window.update()
+        
+        # Desencriptar en un hilo separado
+        def run_decrypt():
+            try:
+                success, message = decrypt_backup_file(
+                    file_path, 
+                    password, 
+                    output_dir if output_dir else None
+                )
+                
+                # Actualizar UI en el hilo principal
+                file_window.after(0, lambda: complete_decrypt(success, message))
+            except Exception as e:
+                file_window.after(0, lambda: complete_decrypt(False, str(e)))
+                
+        def complete_decrypt(success, message):
+            progress_window.destroy()
+            if success:
+                messagebox.showinfo("Éxito", message)
+            else:
+                messagebox.showerror("Error", message)
+        
+        # Iniciar proceso de desencriptación
+        threading.Thread(target=run_decrypt, daemon=True).start()
 
-    insert_button = customtkinter.CTkButton(frame, text="Desencriptar", command=insert_file, fg_color="blue")
-    insert_button.pack(pady=10)
+    decrypt_button = customtkinter.CTkButton(
+        frame, 
+        text="🔓 Desencriptar", 
+        command=decrypt_file, 
+        fg_color="blue"
+    )
+    decrypt_button.pack(pady=20)
 
-    def on_closing():
+    # Manejo del cierre de la ventana
+    def on_closing() -> None:
         parent_window.deiconify()
         file_window.destroy()
 
     file_window.protocol("WM_DELETE_WINDOW", on_closing)
     file_window.mainloop()
 
-def open_backup_interface(server_data):
-    global app_running, backup_hours, backup_minutes, selected_amount, root_window, app_icon
+# Interfaz principal de respaldo
+def open_backup_interface(server_data: Dict[str, Any]) -> None:
+    """Crea la interfaz principal para la gestión de respaldos."""
+    global program_state
+    
     root = customtkinter.CTk()
-    root_window = root  # Guardar referencia a la ventana principal
-    root.title("Respaldo local")
+    AppState.root_window = root
+    root.title("Sistema de Respaldo - Methodo")
     center_window(root, 600, 400)
 
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=5, padx=5, fill="both", expand=True)
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    logo_path = os.path.join(base_dir, "assets", "METHODO.png")
-    logo_image = Image.open(logo_path)
+    # Cargar logo
+    logo_image = load_app_image("METHODO.png")
     logo_ctk_image = customtkinter.CTkImage(light_image=logo_image, dark_image=logo_image, size=(200, 200))
 
+    # Panel superior con logo y botones
     top_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
     top_frame.pack(pady=10, padx=10, fill="x")
 
     logo_label = customtkinter.CTkLabel(top_frame, image=logo_ctk_image, text="")
     logo_label.pack(side="left", padx=50)
 
+    # Marco para botones
     buttons_frame = customtkinter.CTkFrame(top_frame, fg_color="transparent")
     buttons_frame.pack(side="right", padx=10)
 
-    history_button = customtkinter.CTkButton(buttons_frame, text="⟳ Historial", width=30, command=lambda: show_backup_history(), fg_color="green")
+    # Información de cliente
+    client_name = server_data.get("client", "Cliente no identificado")
+    client_label = customtkinter.CTkLabel(
+        buttons_frame, 
+        text=f"Cliente: {client_name}", 
+        font=("Arial", 14, "bold")
+    )
+    client_label.pack(pady=5, anchor="e")
+
+    # Botones de acciones
+    history_button = customtkinter.CTkButton(
+        buttons_frame, 
+        text="⟳ Historial", 
+        width=30, 
+        command=lambda: show_backup_history(rounded_label), 
+        fg_color="green"
+    )
     history_button.pack(pady=5, anchor="e")
 
-    eye_button = customtkinter.CTkButton(buttons_frame, text="👁 Desencriptar", width=30, command=lambda: open_file_interface(root), fg_color="RoyalBlue1")
+    eye_button = customtkinter.CTkButton(
+        buttons_frame, 
+        text="👁 Desencriptar", 
+        width=30, 
+        command=lambda: open_file_interface(root), 
+        fg_color="RoyalBlue1"
+    )
     eye_button.pack(pady=5, anchor="e")
 
-    advanced_settings_button = customtkinter.CTkButton(buttons_frame, text="⚙ Configuración avanzada", command=lambda: open_advance_options(root, rounded_label), fg_color="DarkOrange3", width=150)
-    advanced_settings_button.pack(pady=5, anchor="e")
+    # Botón de configuración avanzada (se define más abajo)
+    advanced_settings_button = None
 
-    def update_label():
+    # Marco para selección de carpeta
+    def update_label() -> Optional[str]:
+        """Actualiza la etiqueta con la carpeta seleccionada."""
         folder = filedialog.askdirectory()
         if folder:
             rounded_label.configure(text=folder)
             return folder
         else:
             messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
-            return ""
+            return None
 
-    lupa_path = os.path.join(base_dir, "assets", "lupa.png")
-    lupa_image = Image.open(lupa_path)
+    # Cargar ícono de lupa
+    lupa_image = load_app_image("lupa.png")
     lupa_ctk_image = customtkinter.CTkImage(light_image=lupa_image, dark_image=lupa_image, size=(30, 30))
 
     lupa_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
     lupa_frame.pack(pady=10, padx=10, fill="x")
 
-    lupa_button = customtkinter.CTkButton(lupa_frame, image=lupa_ctk_image, text="", command=update_label, fg_color="green", width=120, height=32)
+    lupa_button = customtkinter.CTkButton(
+        lupa_frame, 
+        image=lupa_ctk_image, 
+        text="", 
+        command=update_label, 
+        fg_color="green", 
+        width=120, 
+        height=32
+    )
     lupa_button.pack(side="left", padx=5)
 
-    rounded_label = customtkinter.CTkLabel(lupa_frame, text="", font=("Arial", 12), corner_radius=10, fg_color="gray", width=30)
+    # Etiqueta para mostrar la carpeta seleccionada
+    rounded_label = customtkinter.CTkLabel(
+        lupa_frame, 
+        text=program_state.get("backup_dir", ""), 
+        font=("Arial", 12), 
+        corner_radius=10, 
+        fg_color="gray", 
+        width=30
+    )
     rounded_label.pack(side="left", padx=5, fill="x", expand=True)
 
-    execute_button = customtkinter.CTkButton(frame, text="Ejecutar", command=lambda: execute_backup(rounded_label.cget("text"), server_data, backup_hours, backup_minutes), fg_color="green")
+    # Ahora definimos el botón de configuración avanzada
+    advanced_settings_button = customtkinter.CTkButton(
+        buttons_frame, 
+        text="⚙ Configuración avanzada", 
+        command=lambda: open_advance_options(root, rounded_label), 
+        fg_color="DarkOrange3", 
+        width=150
+    )
+    advanced_settings_button.pack(pady=5, anchor="e")
+
+    # Botón para ejecutar respaldo
+    execute_button = customtkinter.CTkButton(
+        frame, 
+        text="Ejecutar Respaldo", 
+        command=lambda: execute_backup(
+            rounded_label.cget("text"), 
+            server_data, 
+            AppState.backup_hours, 
+            AppState.backup_minutes
+        ), 
+        fg_color="green"
+    )
     execute_button.pack(pady=10)
 
-    folder_path = ""
+    # Estado de programación
+    schedule_status = "No programado"
+    if AppState.backup_hours is not None and AppState.backup_minutes is not None:
+        schedule_status = f"Programado: cada {AppState.backup_hours}h:{AppState.backup_minutes}m"
+    
+    schedule_label = customtkinter.CTkLabel(
+        frame, 
+        text=schedule_status,
+        font=("Arial", 12, "italic")
+    )
+    schedule_label.pack(pady=5)
 
-    def execute_backup(folder, server_data, backup_hours, backup_minutes):
-        global scheduled
+    # Variable para guardar la ruta de la carpeta
+    folder_path = program_state.get("backup_dir", "")
+    if folder_path:
+        rounded_label.configure(text=folder_path)
+
+    # Función para ejecutar respaldo
+    def execute_backup(
+        folder: str, 
+        server_data: Dict[str, Any], 
+        backup_hours: Optional[int], 
+        backup_minutes: Optional[int]
+    ) -> None:
+        """Ejecuta un respaldo de la base de datos."""
         nonlocal folder_path
-        folder_path = folder.replace("Destino: ", "")
-
+        folder_path = folder
+        
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
+            
+        # Verificar directorio
+        if not os.path.isdir(folder_path):
+            try:
+                os.makedirs(folder_path, exist_ok=True)
+                logger.info(f"Directorio creado: {folder_path}")
+            except Exception as e:
+                logger.error(f"Error al crear directorio: {e}")
+                messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
+                return
 
         # Creación de la ventana de progreso
         progress_window = customtkinter.CTkToplevel(root)
         progress_window.title("Realizando Respaldo")
         center_window(progress_window, 300, 100)
-        progress_window.attributes('-topmost', True)  # Asegura que esté al frente
-        progress_window.focus_force()  # Forzar el foco
+        progress_window.attributes('-topmost', True)
+        progress_window.focus_force()
 
         # Marco para contener los elementos de la ventana de progreso
         progress_frame = customtkinter.CTkFrame(progress_window)
         progress_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Usar ttk.Progressbar en lugar de CTkProgressBar para mejor compatibilidad
+        # Usar ttk.Progressbar
         progressbar = ttk.Progressbar(progress_frame, mode='determinate', length=280)
         progressbar.pack(pady=10, padx=10)
 
@@ -320,15 +621,16 @@ def open_backup_interface(server_data):
         progress_label = customtkinter.CTkLabel(progress_frame, text="Iniciando respaldo...")
         progress_label.pack(pady=5)
 
-        # Forzar la actualización de la interfaz para que aparezca de inmediato
+        # Forzar la actualización de la interfaz
         progress_window.update()
 
-        def update_progress(value, text):
+        def update_progress(value: int, text: str) -> None:
+            """Actualiza la barra de progreso y el texto."""
             if progress_window.winfo_exists():
                 progressbar['value'] = value
                 progress_label.configure(text=text)
                 progress_window.update_idletasks()
-                progress_window.update()  # Asegurar actualización completa
+                progress_window.update()
 
         try:
             if server_data is None:
@@ -338,17 +640,22 @@ def open_backup_interface(server_data):
 
             if server_data["server_type"] == "MySQL Server (TCP/IP)":
                 try:
-                    # Actualizar el estado del programa antes de iniciar el respaldo
+                    # Actualizar el estado del programa
                     program_state["running"] = True
                     program_state["status"] = "in_progress"
+                    program_state["backup_dir"] = folder_path
                     save_state(STATUS_PROGRAM, program_state)
 
-                    # Lanzar el respaldo en un hilo separado para no bloquear la interfaz
-                    def run_backup():
+                    # Lanzar el respaldo en un hilo separado
+                    def run_backup() -> None:
                         try:
-                            backup_mysql_database(server_data["password"], folder_path, 
-                                                server_data["client"], selected_amount, 
-                                                update_callback=update_progress)
+                            backup_mysql_database(
+                                server_data["password"], 
+                                folder_path, 
+                                server_data["client"], 
+                                AppState.selected_amount, 
+                                update_callback=update_progress
+                            )
                             
                             # Actualizar al completar en el hilo principal
                             progress_window.after(0, lambda: completion_tasks())
@@ -356,7 +663,7 @@ def open_backup_interface(server_data):
                             # Manejar errores en el hilo principal
                             progress_window.after(0, lambda: handle_error(e))
                     
-                    def completion_tasks():
+                    def completion_tasks() -> None:
                         update_progress(100, "Respaldo completado.")
                         program_state["status"] = "completed"
                         save_state(STATUS_PROGRAM, program_state)
@@ -371,21 +678,38 @@ def open_backup_interface(server_data):
                             ocultar_ventana()
                             program_state["client"] = server_data["client"]
                             program_state["backup_dir"] = folder_path
-                            program_state["amount"] = selected_amount
+                            program_state["amount"] = AppState.selected_amount
                             program_state["timestamp"] = datetime.datetime.now().isoformat()
                             save_state(STATUS_PROGRAM, program_state)
-                            threading.Thread(target=run_scheduler, daemon=True).start()
-                            messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
+                            
+                            # Actualizar etiqueta de programación
+                            schedule_label.configure(
+                                text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
+                            )
+                            
+                            # Iniciar hilo de programación
+                            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+                                AppState.scheduled_backup_thread = threading.Thread(
+                                    target=run_scheduler, 
+                                    daemon=True
+                                )
+                                AppState.scheduled_backup_thread.start()
+                                
+                            messagebox.showinfo(
+                                "Info", 
+                                f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
+                            )
                         else:
                             messagebox.showinfo("Info", "Respaldo automático no programado.")
                     
-                    def handle_error(e):
+                    def handle_error(e: Exception) -> None:
                         program_state["status"] = "error"
                         save_state(STATUS_PROGRAM, program_state)
                         
                         if progress_window.winfo_exists():
                             progress_window.destroy()
                         
+                        logger.error(f"Error en el respaldo: {e}", exc_info=True)
                         messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
                     
                     # Iniciar el proceso de respaldo en un hilo separado
@@ -399,7 +723,8 @@ def open_backup_interface(server_data):
                     if progress_window.winfo_exists():
                         progress_window.destroy()
                     
-                    messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    logger.error(f"Error al iniciar el respaldo: {e}", exc_info=True)
+                    messagebox.showerror("Error", f"Error al iniciar el respaldo: {e}")
             else:
                 if progress_window.winfo_exists():
                     progress_window.destroy()
@@ -411,76 +736,188 @@ def open_backup_interface(server_data):
             if progress_window and progress_window.winfo_exists():
                 progress_window.destroy()
             
+            logger.error(f"Error general en respaldo: {e}", exc_info=True)
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
 
-    def schedule_backup(backup_hours, backup_minutes):
+    def schedule_backup(backup_hours: Optional[int], backup_minutes: Optional[int]) -> None:
+        """Programa un respaldo automático."""
+        if backup_hours is None or backup_minutes is None:
+            logger.warning("Intento de programar respaldo con horas o minutos nulos")
+            return
+            
         interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-        schedule.every(interval_seconds).seconds.do(lambda: execute_programed_backup(folder_path, server_data))
+        logger.info(f"Programando respaldo cada {interval_seconds} segundos")
+        
+        # Limpiar programaciones anteriores
+        schedule.clear()
+        
+        # Programar nueva tarea
+        schedule.every(interval_seconds).seconds.do(
+            lambda: execute_programed_backup(folder_path, server_data)
+        )
+        
+        # Actualizar estado
+        AppState.set_scheduled(True)
+        AppState.set_backup_time(backup_hours, backup_minutes)
     
-    def run_scheduler():
-        while True:
+    def run_scheduler() -> None:
+        """Ejecuta el programador de tareas."""
+        logger.info("Iniciando programador de respaldos")
+        while AppState.running and AppState.scheduled:
             schedule.run_pending()
             time.sleep(1)
+        logger.info("Programador de respaldos detenido")
 
-    def execute_programed_backup(folder_path, server_data):
+    def execute_programed_backup(folder_path: str, server_data: Dict[str, Any]) -> None:
+        """Ejecuta un respaldo programado."""
         try:
-            if server_data is None:
-                messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+            if not AppState.running or not AppState.scheduled:
                 return
-            if server_data["server_type"] == "MySQL Server (TCP/IP)":
-                backup_mysql_database(server_data["password"], folder_path, server_data["client"], selected_amount)
                 
+            logger.info(f"Ejecutando respaldo programado en {folder_path}")
+            
+            if server_data is None:
+                logger.error("No se recibieron los datos del servidor para respaldo programado")
+                return
+                
+            if server_data["server_type"] == "MySQL Server (TCP/IP)":
+                result = backup_mysql_database(
+                    server_data["password"], 
+                    folder_path, 
+                    server_data["client"], 
+                    AppState.selected_amount
+                )
+                
+                if result:
+                    logger.info("Respaldo programado completado con éxito")
+                else:
+                    logger.error("Respaldo programado completado con errores")
             else:
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                logger.error("Tipo de servidor no soportado para respaldo programado")
+                message = "Tipo de servidor no soportado para respaldo programado"
+                send_email(server_data.get("client", "Cliente"), message)
         except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo automático: {e}")
+            logger.error(f"Error al ejecutar el respaldo automático: {e}", exc_info=True)
             message = f"Error al ejecutar el respaldo automático: {e}"
-            send_email(message)
+            send_email(server_data.get("client", "Cliente"), message)
 
-    def ocultar_ventana():
+    def ocultar_ventana() -> None:
+        """Oculta la ventana principal y muestra un ícono en la bandeja del sistema."""
         root.withdraw()
         create_system_tray_icon()
     
-    def show_backup_history():
+    def show_backup_history(label_widget: customtkinter.CTkLabel) -> None:
+        """Muestra el historial de respaldos realizados."""
         try:
-            backup_dir = rounded_label.cget("text").replace("Destino: ", "")
+            backup_dir = label_widget.cget("text")
+            if not backup_dir:
+                raise ValueError("No se ha seleccionado un directorio de respaldos.")
+                
             if not os.path.exists(backup_dir):
                 raise ValueError("El directorio de respaldos no existe.")
+                
+            # Buscar archivos de respaldo
             backup_files = [
                 entry.path for entry in os.scandir(backup_dir) if entry.is_file() and entry.name.endswith(".7z")
             ]
+            
             if not backup_files:
-                raise ValueError("No hay respaldos disponibles.")
+                raise ValueError("No hay respaldos disponibles en el directorio seleccionado.")
+                
+            # Ordenar por fecha de modificación (más reciente primero)
             backup_files.sort(key=os.path.getmtime, reverse=True)
+            
+            # Crear lista formateada
             backup_history = [
                 f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
                 for file in backup_files
             ]
-            messagebox.showinfo("Historial de Respaldos", "\n".join(backup_history))
+            
+            # Mostrar en ventana de diálogo
+            history_window = customtkinter.CTkToplevel(root)
+            history_window.title("Historial de Respaldos")
+            center_window(history_window, 600, 400)
+            
+            history_frame = customtkinter.CTkFrame(history_window)
+            history_frame.pack(pady=10, padx=10, fill="both", expand=True)
+            
+            title_label = customtkinter.CTkLabel(
+                history_frame, 
+                text="Historial de Respaldos", 
+                font=("Arial", 16, "bold")
+            )
+            title_label.pack(pady=10)
+            
+            # Crear scrollable frame para la lista
+            scrollable_frame = customtkinter.CTkScrollableFrame(history_frame)
+            scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Añadir items a la lista
+            for i, history_item in enumerate(backup_history):
+                item_frame = customtkinter.CTkFrame(scrollable_frame)
+                item_frame.pack(fill="x", pady=2)
+                
+                item_label = customtkinter.CTkLabel(
+                    item_frame,
+                    text=history_item,
+                    anchor="w",
+                    font=("Arial", 12)
+                )
+                item_label.pack(side="left", fill="x", expand=True, padx=5)
+                
+            close_button = customtkinter.CTkButton(
+                history_frame,
+                text="Cerrar",
+                command=history_window.destroy,
+                fg_color="gray"
+            )
+            close_button.pack(pady=10)
+            
         except ValueError as ve:
             messagebox.showinfo("Historial de Respaldos", str(ve))
         except Exception as e:
+            logger.error(f"Error al obtener el historial de respaldos: {e}", exc_info=True)
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
-    def on_closing():
-        global app_running
-        app_running = False
-        if app_icon:
-            app_icon.stop()  # Cerrar el ícono de la bandeja si existe
+    def on_closing() -> None:
+        """Maneja el cierre de la ventana principal."""
+        if AppState.scheduled:
+            if not messagebox.askyesno(
+                "Confirmar salida", 
+                "Hay respaldos programados en ejecución. ¿Desea cerrar la aplicación?"
+            ):
+                return
+        
+        AppState.running = False
+        AppState.scheduled = False
+        
+        if AppState.app_icon:
+            AppState.app_icon.stop()
+            
+        # Guardar estado actual
+        program_state["running"] = False
+        program_state["status"] = "stopped"
+        save_state(STATUS_PROGRAM, program_state)
+        
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
-def open_advance_options(parent_window, rounded_label):
-    global scheduled, scheduled_backup_thread, task_configurations, backup_hours, backup_minutes
-
-    if scheduled:
-        pause_message = f"Se pausará el respaldo automático de la tarea en {str(backup_hours).zfill(2)}:{str(backup_minutes).zfill(2)}. ¿Estás seguro que quieres continuar?"
+def open_advance_options(parent_window: customtkinter.CTk, rounded_label: customtkinter.CTkLabel) -> None:
+    """Abre la ventana de opciones avanzadas."""
+    # Si hay un respaldo programado, confirmar pausa
+    if AppState.scheduled:
+        pause_message = (
+            f"Se pausará el respaldo automático programado "
+            f"({str(AppState.backup_hours).zfill(2)}:{str(AppState.backup_minutes).zfill(2)}). "
+            f"¿Estás seguro que quieres continuar?"
+        )
         if not messagebox.askyesno("Confirmación", pause_message):
             return
-        scheduled = False
+        AppState.set_scheduled(False)
 
+    # Crear ventana de configuración
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
     center_window(root, 500, 500)
@@ -488,44 +925,82 @@ def open_advance_options(parent_window, rounded_label):
     frame = customtkinter.CTkFrame(root)
     frame.pack(pady=20, padx=60, fill="both")
 
-    autorespaldos_label = customtkinter.CTkLabel(frame, text="Respaldo Automático", font=("Arial", 14, "bold"))
+    # Sección de respaldo automático
+    autorespaldos_label = customtkinter.CTkLabel(
+        frame, 
+        text="Respaldo Automático", 
+        font=("Arial", 14, "bold")
+    )
     autorespaldos_label.pack(pady=5)
 
+    # Marco para tareas programadas
     tasks_frame = customtkinter.CTkFrame(frame)
     tasks_frame.pack(pady=5, padx=10, fill="x", expand=True)
 
+    # Lista para almacenar tareas adicionales
     additional_tasks = []
+    
+    # Etiqueta para mostrar tareas configuradas
+    tasks_label = customtkinter.CTkLabel(
+        tasks_frame, 
+        text="Tareas configuradas:\n", 
+        font=("Arial", 12), 
+        anchor="w", 
+        justify="left"
+    )
+    tasks_label.pack(pady=5, padx=5, fill="x")
 
-    def add_task(hour="00", minute="00"):
+    def add_task(hour: str = "00", minute: str = "00") -> None:
+        """Añade una nueva tarea programada."""
         if len(additional_tasks) >= 3:
             messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
+            return
 
+        # Crear frame para la tarea
         task_frame = customtkinter.CTkFrame(tasks_frame)
 
+        # Selector de hora
         task_hour_label = customtkinter.CTkLabel(task_frame, text="Hora:")
         task_hour_label.pack(side="left", padx=(10, 5), anchor="w")
-        task_hour_combobox = customtkinter.CTkComboBox(task_frame, values=[str(h).zfill(2) for h in range(24)], width=80, justify="center")
+        task_hour_combobox = customtkinter.CTkComboBox(
+            task_frame, 
+            values=[str(h).zfill(2) for h in range(24)], 
+            width=80, 
+            justify="center"
+        )
         task_hour_combobox.set(hour)
         task_hour_combobox.pack(side="left", padx=(5, 5), anchor="w")
 
+        # Selector de minuto
         task_minute_label = customtkinter.CTkLabel(task_frame, text="Minuto:")
         task_minute_label.pack(side="left", padx=(5, 5), anchor="w")
-        task_minute_combobox = customtkinter.CTkComboBox(task_frame, values=[str(m).zfill(2) for m in range(60)], width=80, justify="center")
+        task_minute_combobox = customtkinter.CTkComboBox(
+            task_frame, 
+            values=[str(m).zfill(2) for m in range(60)], 
+            width=80, 
+            justify="center"
+        )
         task_minute_combobox.set(minute)
         task_minute_combobox.pack(side="left", padx=(5, 5), anchor="w")
 
-        task_hour_combobox.configure(justify="center")
-        task_minute_combobox.configure(justify="center")
-
-        remove_button = customtkinter.CTkButton(task_frame, text="-", width=30, fg_color="red", command=lambda: remove_task(task_frame))
+        # Botón para eliminar tarea
+        remove_button = customtkinter.CTkButton(
+            task_frame, 
+            text="-", 
+            width=30, 
+            fg_color="red", 
+            command=lambda: remove_task(task_frame)
+        )
         remove_button.pack(side="left", padx=(5, 5))
 
         task_frame.pack(pady=5, padx=10, fill="x")
 
+        # Añadir a la lista de tareas
         additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
         update_tasks_label()
 
-    def remove_task(task_frame):
+    def remove_task(task_frame: customtkinter.CTkFrame) -> None:
+        """Elimina una tarea programada."""
         for task in additional_tasks:
             if task[0] == task_frame:
                 additional_tasks.remove(task)
@@ -533,136 +1008,199 @@ def open_advance_options(parent_window, rounded_label):
                 break
         update_tasks_label()
 
-    def update_tasks_label():
+    def update_tasks_label() -> None:
+        """Actualiza la etiqueta con las tareas configuradas."""
         tasks_text = "Tareas configuradas:\n"
-        task_configurations.clear()
+        AppState.task_configurations.clear()
+        
         for idx, (_, hour_combobox, minute_combobox) in enumerate(additional_tasks, start=1):
             hour = hour_combobox.get()
             minute = minute_combobox.get()
-            task_configurations.append((hour, minute))
+            AppState.task_configurations.append((hour, minute))
             tasks_text += f"Tarea {idx}: {hour}:{minute}\n"
+            
         tasks_label.configure(text=tasks_text)
 
-    tasks_label = customtkinter.CTkLabel(tasks_frame, text="Tareas configuradas:\n", font=("Arial", 12), anchor="w", justify="left")
-    tasks_label.pack(pady=5, padx=5, fill="x")
+    # Botón para añadir tarea
+    add_task_button = customtkinter.CTkButton(
+        frame, 
+        text="+", 
+        width=30, 
+        fg_color="green", 
+        command=add_task
+    )
+    add_task_button.pack(pady=10, padx=20, anchor="e")
 
-    add_task_button = customtkinter.CTkButton(frame, text="+", width=30, fg_color="green", command=add_task)
-    add_task_button.pack(pady=20, padx=20, anchor="e")
-
-    for hour, minute in task_configurations:
+    # Añadir tareas existentes
+    for hour, minute in AppState.task_configurations:
         add_task(hour, minute)
 
-    spinbox_var = customtkinter.IntVar(value=0)
+    # Control de cantidad máxima de respaldos
+    spinbox_var = customtkinter.IntVar(value=AppState.selected_amount)
     spinbox_frame = customtkinter.CTkFrame(frame)
     spinbox_frame.pack(pady=10, side="bottom")
 
-    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Cantidad max respaldos:")
+    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Cantidad máx respaldos:")
     delete_label.pack(side="left", padx=5)
 
-    numeric_entry = customtkinter.CTkEntry(spinbox_frame, textvariable=spinbox_var, width=50, justify="center")
+    numeric_entry = customtkinter.CTkEntry(
+        spinbox_frame, 
+        textvariable=spinbox_var, 
+        width=50, 
+        justify="center"
+    )
     numeric_entry.pack(side="left", padx=5)
 
-    def decrease_value():
+    def decrease_value() -> None:
+        """Disminuye el valor del spinbox."""
         current_value = spinbox_var.get()
         if current_value > 1:
             spinbox_var.set(current_value - 1)
             numeric_entry.delete(0, "end")
             numeric_entry.insert(0, str(spinbox_var.get()))
 
-    decrease_button = customtkinter.CTkButton(spinbox_frame, text="-", width=30, command=decrease_value, fg_color="red")
+    decrease_button = customtkinter.CTkButton(
+        spinbox_frame, 
+        text="-", 
+        width=30, 
+        command=decrease_value, 
+        fg_color="red"
+    )
     decrease_button.pack(side="left", padx=5)
 
-    def increase_value():
+    def increase_value() -> None:
+        """Aumenta el valor del spinbox."""
         current_value = spinbox_var.get()
         if current_value < 100:
             spinbox_var.set(current_value + 1)
             numeric_entry.delete(0, "end")
             numeric_entry.insert(0, str(spinbox_var.get()))
 
-    increase_button = customtkinter.CTkButton(spinbox_frame, text="+", width=30, command=increase_value, fg_color="green")
+    increase_button = customtkinter.CTkButton(
+        spinbox_frame, 
+        text="+", 
+        width=30, 
+        command=increase_value, 
+        fg_color="green"
+    )
     increase_button.pack(side="right", padx=0)
 
-    def save_advanced_settings():
-        global scheduled, scheduled_backup_thread, app_running, task_configurations, backup_hours, backup_minutes, selected_amount
+    def save_advanced_settings() -> None:
+        """Guarda la configuración avanzada."""
         try:
-            task_configurations.clear()
+            # Procesar tareas configuradas
+            AppState.task_configurations.clear()
             for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
-                task_hours = int(task_hour_combobox.get())
-                task_minutes = int(task_minute_combobox.get())
+                try:
+                    task_hours = int(task_hour_combobox.get())
+                    task_minutes = int(task_minute_combobox.get())
+                except ValueError:
+                    raise ValueError("Horas o minutos deben ser valores numéricos.")
+                    
                 if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
                     raise ValueError("Horas o minutos inválidos en una tarea adicional.")
-                task_configurations.append((str(task_hours).zfill(2), str(task_minutes).zfill(2)))
+                    
+                AppState.task_configurations.append((str(task_hours).zfill(2), str(task_minutes).zfill(2)))
 
-            if task_configurations:
-                backup_hours = int(task_configurations[0][0])
-                backup_minutes = int(task_configurations[0][1])
-                scheduled = True
+            # Configurar tiempo de respaldo si hay tareas
+            if AppState.task_configurations:
+                AppState.set_backup_time(
+                    int(AppState.task_configurations[0][0]), 
+                    int(AppState.task_configurations[0][1])
+                )
+                AppState.set_scheduled(True)
 
+            # Configurar cantidad máxima de respaldos
             selected_amount = spinbox_var.get()
-            if selected_amount > 0:
-                messagebox.showinfo("Info", f"Cantidad de respaldos máximos en carpeta: {selected_amount}")
-            else:
-                raise ValueError("El valor de respaldos a borrar debe ser mayor que 0.")
-
-            folder_path = rounded_label.cget("text").replace("Destino: ", "")
+            if selected_amount <= 0:
+                raise ValueError("El valor de respaldos a mantener debe ser mayor que 0.")
+                
+            AppState.set_amount(selected_amount)
+            
+            # Verificar directorio de destino
+            folder_path = rounded_label.cget("text")
             if not folder_path:
                 raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
-            parent_window.update_idletasks()
-            rounded_label.configure(text=f"Destino: {folder_path}")
-
+                
+            # Guardar configuración
+            program_state["amount"] = selected_amount
+            save_state(STATUS_PROGRAM, program_state)
+                
+            logger.info(f"Configuración avanzada guardada: {selected_amount} respaldos máximos")
+            if AppState.task_configurations:
+                logger.info(f"Tareas programadas: {AppState.task_configurations}")
+                
             messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
             root.destroy()
             parent_window.deiconify()
 
         except ValueError as e:
             messagebox.showerror("Error", f"Error en la configuración: {e}")
+            root.focus_force()
+        except Exception as e:
+            logger.error(f"Error al guardar configuración avanzada: {e}", exc_info=True)
+            messagebox.showerror("Error", f"Error al guardar configuración: {e}")
             root.destroy()
             parent_window.deiconify()
-        except Exception as e:
-            print(f"An error occurred in save_advanced_settings: {e}")
 
-    save_button = customtkinter.CTkButton(frame, text="Guardar Configuración", command=save_advanced_settings, fg_color="green")
-    save_button.pack(side="bottom", pady=5)
+    # Botón para guardar configuración
+    save_button = customtkinter.CTkButton(
+        frame, 
+        text="Guardar Configuración", 
+        command=save_advanced_settings, 
+        fg_color="green"
+    )
+    save_button.pack(side="bottom", pady=15)
 
-    def on_closing():
-        global app_running
-        app_running = False
+    # Manejo del cierre de la ventana
+    def on_closing() -> None:
         root.destroy()
         parent_window.deiconify()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
-def create_system_tray_icon():
-    global app_icon, root_window
+def create_system_tray_icon() -> None:
+    """Crea un ícono en la bandeja del sistema."""
+    def show_window(icon, item) -> None:
+        """Muestra la ventana principal."""
+        AppState.root_window.deiconify()
+        AppState.root_window.lift()
+        AppState.root_window.focus_force()
     
-    def show_window(icon, item):
-        root_window.deiconify()  # Mostrar la ventana
-        root_window.lift()  # Traer al frente
-        root_window.focus_force()  # Dar foco
-    
-    def exit_app(icon, item):
-        # Guardar el estado actual antes de cerrar
-        if 'program_state' in globals() and program_state:
+    def exit_app(icon, item) -> None:
+        """Cierra la aplicación desde la bandeja del sistema."""
+        # Guardar estado antes de cerrar
+        if program_state:
             program_state["running"] = False
+            program_state["status"] = "stopped"
             save_state(STATUS_PROGRAM, program_state)
         
-        icon.stop()  # Detener el ícono
-        root_window.destroy()  # Cerrar la aplicación
+        # Detener programador y threads
+        AppState.running = False
+        AppState.scheduled = False
+        
+        # Detener ícono y cerrar ventana
+        icon.stop()
+        if AppState.root_window:
+            AppState.root_window.destroy()
     
     # Crear menú para el ícono
     menu = (
-        pystray.MenuItem('Mostrar Respaldo local', show_window),
+        pystray.MenuItem('Mostrar Sistema de Respaldo', show_window),
         pystray.MenuItem('Salir', exit_app)
     )
     
     # Cargar ícono para la bandeja
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_path = os.path.join(base_dir, "assets", "METHODO.png")
-    image = Image.open(icon_path)
-    
-    # Crear el ícono en la bandeja
-    app_icon = pystray.Icon("MethodoRespaldo", image, "Methodo Respaldo", menu)
-    
-    # Ejecutar el ícono en un hilo separado para no bloquear la interfaz
-    threading.Thread(target=app_icon.run, daemon=True).start()
+    try:
+        icon_image = load_app_image("METHODO.png")
+        
+        # Crear el ícono en la bandeja
+        AppState.app_icon = pystray.Icon("MethodoRespaldo", icon_image, "Methodo Respaldo", menu)
+        
+        # Ejecutar el ícono en un hilo separado
+        threading.Thread(target=AppState.app_icon.run, daemon=True).start()
+        logger.info("Icono de bandeja del sistema iniciado")
+    except Exception as e:
+        logger.error(f"Error al crear ícono de bandeja: {e}", exc_info=True)
+        messagebox.showerror("Error", "No se pudo crear el ícono en la bandeja del sistema.")
