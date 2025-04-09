@@ -5,9 +5,10 @@ import time
 import threading
 import schedule
 import customtkinter
+import pystray
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from PIL import Image
-from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, max_backups, KEY
+from functions import encrypt, bd_connect_mysql, send_email, backup_mysql_database, save_state, program_state, server_data_state, KEY, STATUS_PROGRAM, SERVER_DATA
 
 customtkinter.set_appearance_mode("dark") 
 
@@ -18,6 +19,8 @@ backup_minutes = None
 scheduled = False
 scheduled_backup_thread = None
 selected_amount = 0
+app_icon = None
+root_window = None
 
 def center_window(window, width, height):
     """Centrar una ventana en la pantalla."""
@@ -78,7 +81,20 @@ def create_login_interface():
         if username == "admin" and password == "1234":
             messagebox.showinfo("Éxito", "Inicio de sesión exitoso.")
             login_window.destroy()
-            create_server_interface()
+            if program_state["running"] == True:
+                server_type = server_data_state["server_type"]
+                if server_type == "MySQL Server (TCP/IP)":
+                    host = server_data_state["host"]
+                    port = server_data_state["port"]
+                    password = server_data_state["password"]
+                    connectionBD = bd_connect_mysql(host, port, password)[1]
+                if connectionBD:
+                    open_backup_interface(server_data_state)
+                else:
+                    messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+                    create_server_interface()
+            else:
+                create_server_interface()
         else:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
 
@@ -140,11 +156,16 @@ def create_server_interface():
             client = ""
             if server_type_selected == "MySQL Server (TCP/IP)":
                 client, connection_success = bd_connect_mysql(host, port, encrypted_password)
-                if connection_success :
-                    server_data = [server_type_selected, host, port, encrypted_password, client]
+                if connection_success:
+                    server_data_state["server_type"] = server_type_selected
+                    server_data_state["host"] = host
+                    server_data_state["port"] = port
+                    server_data_state["password"] = encrypted_password
+                    server_data_state["client"] = client
+                    save_state(SERVER_DATA, server_data_state)
                     messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos MySQL. Cliente: {client}")
                     server_window.destroy()
-                    open_backup_interface(server_data)
+                    open_backup_interface(server_data_state)
                 else:
                     messagebox.showerror("Error", f"Error en la conexión a la base de datos MySQL: {client}")
             # elif server_type_selected == "SQL Server (Windows Authentication)":
@@ -163,7 +184,6 @@ def create_server_interface():
     server_button.pack(pady=20)
 
     password_entry.bind("<Return>", lambda event: verify_server())
-
     server_window.mainloop()
     
 def open_file_interface(parent_window):
@@ -212,9 +232,10 @@ def open_file_interface(parent_window):
     file_window.protocol("WM_DELETE_WINDOW", on_closing)
     file_window.mainloop()
 
-def open_backup_interface(server_data=None):
-    global app_running, backup_hours, backup_minutes, selected_amount
+def open_backup_interface(server_data):
+    global app_running, backup_hours, backup_minutes, selected_amount, root_window, app_icon
     root = customtkinter.CTk()
+    root_window = root  # Guardar referencia a la ventana principal
     root.title("Respaldo local")
     center_window(root, 600, 400)
 
@@ -270,64 +291,127 @@ def open_backup_interface(server_data=None):
     execute_button.pack(pady=10)
 
     folder_path = ""
+
     def execute_backup(folder, server_data, backup_hours, backup_minutes):
         global scheduled
         nonlocal folder_path
         folder_path = folder.replace("Destino: ", "")
+
         if not folder_path:
             messagebox.showerror("Error", "No se ha seleccionado una carpeta de destino.")
             return
 
-        progress_window = None
+        # Creación de la ventana de progreso
+        progress_window = customtkinter.CTkToplevel(root)
+        progress_window.title("Realizando Respaldo")
+        center_window(progress_window, 300, 100)
+        progress_window.attributes('-topmost', True)  # Asegura que esté al frente
+        progress_window.focus_force()  # Forzar el foco
+
+        # Marco para contener los elementos de la ventana de progreso
+        progress_frame = customtkinter.CTkFrame(progress_window)
+        progress_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Usar ttk.Progressbar en lugar de CTkProgressBar para mejor compatibilidad
+        progressbar = ttk.Progressbar(progress_frame, mode='determinate', length=280)
+        progressbar.pack(pady=10, padx=10)
+
+        # Etiqueta para mostrar el estado actual
+        progress_label = customtkinter.CTkLabel(progress_frame, text="Iniciando respaldo...")
+        progress_label.pack(pady=5)
+
+        # Forzar la actualización de la interfaz para que aparezca de inmediato
+        progress_window.update()
 
         def update_progress(value, text):
-            if progress_window and progress_window.winfo_exists():
+            if progress_window.winfo_exists():
                 progressbar['value'] = value
                 progress_label.configure(text=text)
                 progress_window.update_idletasks()
-
-        progress_window = customtkinter.CTkToplevel(root)
-        progress_window.title("Realizando Respaldo")
-        progress_window.geometry("300x100")
-        center_window(progress_window, 300, 100)
-
-        progressbar = ttk.Progressbar(progress_window, mode='determinate', length=280)
-        progressbar.pack(pady=10, padx=10)
-
-        progress_label = customtkinter.CTkLabel(progress_window, text="Iniciando...")
-        progress_label.pack(pady=5)
+                progress_window.update()  # Asegurar actualización completa
 
         try:
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
+                progress_window.destroy()
                 return
 
-            if server_data[0] == "MySQL Server (TCP/IP)":
-                def backup_with_progress():
-                    try:
-                        backup_mysql_database(server_data[3], folder_path, server_data[4], selected_amount, update_callback=update_progress)
+            if server_data["server_type"] == "MySQL Server (TCP/IP)":
+                try:
+                    # Actualizar el estado del programa antes de iniciar el respaldo
+                    program_state["running"] = True
+                    program_state["status"] = "in_progress"
+                    save_state(STATUS_PROGRAM, program_state)
+
+                    # Lanzar el respaldo en un hilo separado para no bloquear la interfaz
+                    def run_backup():
+                        try:
+                            backup_mysql_database(server_data["password"], folder_path, 
+                                                server_data["client"], selected_amount, 
+                                                update_callback=update_progress)
+                            
+                            # Actualizar al completar en el hilo principal
+                            progress_window.after(0, lambda: completion_tasks())
+                        except Exception as e:
+                            # Manejar errores en el hilo principal
+                            progress_window.after(0, lambda: handle_error(e))
+                    
+                    def completion_tasks():
                         update_progress(100, "Respaldo completado.")
+                        program_state["status"] = "completed"
+                        save_state(STATUS_PROGRAM, program_state)
+                        
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
+                        
                         messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                        
                         if backup_hours or backup_minutes:
                             schedule_backup(backup_hours, backup_minutes)
                             ocultar_ventana()
+                            program_state["client"] = server_data["client"]
+                            program_state["backup_dir"] = folder_path
+                            program_state["amount"] = selected_amount
+                            program_state["timestamp"] = datetime.datetime.now().isoformat()
+                            save_state(STATUS_PROGRAM, program_state)
                             threading.Thread(target=run_scheduler, daemon=True).start()
                             messagebox.showinfo("Info", f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos.")
                         else:
                             messagebox.showinfo("Info", "Respaldo automático no programado.")
-                    except subprocess.CalledProcessError as e:
-                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-                    except Exception as e:
-                            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-                    finally:
+                    
+                    def handle_error(e):
+                        program_state["status"] = "error"
+                        save_state(STATUS_PROGRAM, program_state)
+                        
+                        if progress_window.winfo_exists():
                             progress_window.destroy()
-                threading.Thread(target=backup_with_progress, daemon=True).start()
+                        
+                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    
+                    # Iniciar el proceso de respaldo en un hilo separado
+                    backup_thread = threading.Thread(target=run_backup, daemon=True)
+                    backup_thread.start()
+                    
+                except Exception as e:
+                    program_state["status"] = "error"
+                    save_state(STATUS_PROGRAM, program_state)
+                    
+                    if progress_window.winfo_exists():
+                        progress_window.destroy()
+                    
+                    messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
             else:
+                if progress_window.winfo_exists():
+                    progress_window.destroy()
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
+            program_state["status"] = "error"
+            save_state(STATUS_PROGRAM, program_state)
+            
+            if progress_window and progress_window.winfo_exists():
+                progress_window.destroy()
+            
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")         
 
     def schedule_backup(backup_hours, backup_minutes):
         interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
@@ -343,17 +427,19 @@ def open_backup_interface(server_data=None):
             if server_data is None:
                 messagebox.showerror("Error", "No se recibieron los datos del servidor.")
                 return
-            if server_data[0] == "MySQL Server (TCP/IP)":
-                backup_mysql_database(server_data[3], folder_path, server_data[4], selected_amount)
+            if server_data["server_type"] == "MySQL Server (TCP/IP)":
+                backup_mysql_database(server_data["password"], folder_path, server_data["client"], selected_amount)
+                
             else:
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
-            messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-            message = f"Error al ejecutar el respaldo: {e}"
+            messagebox.showerror("Error", f"Error al ejecutar el respaldo automático: {e}")
+            message = f"Error al ejecutar el respaldo automático: {e}"
             send_email(message)
 
     def ocultar_ventana():
         root.withdraw()
+        create_system_tray_icon()
     
     def show_backup_history():
         try:
@@ -379,6 +465,8 @@ def open_backup_interface(server_data=None):
     def on_closing():
         global app_running
         app_running = False
+        if app_icon:
+            app_icon.stop()  # Cerrar el ícono de la bandeja si existe
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
@@ -544,3 +632,37 @@ def open_advance_options(parent_window, rounded_label):
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
+
+def create_system_tray_icon():
+    global app_icon, root_window
+    
+    def show_window(icon, item):
+        root_window.deiconify()  # Mostrar la ventana
+        root_window.lift()  # Traer al frente
+        root_window.focus_force()  # Dar foco
+    
+    def exit_app(icon, item):
+        # Guardar el estado actual antes de cerrar
+        if 'program_state' in globals() and program_state:
+            program_state["running"] = False
+            save_state(STATUS_PROGRAM, program_state)
+        
+        icon.stop()  # Detener el ícono
+        root_window.destroy()  # Cerrar la aplicación
+    
+    # Crear menú para el ícono
+    menu = (
+        pystray.MenuItem('Mostrar Respaldo local', show_window),
+        pystray.MenuItem('Salir', exit_app)
+    )
+    
+    # Cargar ícono para la bandeja
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(base_dir, "assets", "METHODO.png")
+    image = Image.open(icon_path)
+    
+    # Crear el ícono en la bandeja
+    app_icon = pystray.Icon("MethodoRespaldo", image, "Methodo Respaldo", menu)
+    
+    # Ejecutar el ícono en un hilo separado para no bloquear la interfaz
+    threading.Thread(target=app_icon.run, daemon=True).start()
