@@ -22,6 +22,9 @@ from functions import (
 # Configurar apariencia inicial
 customtkinter.set_appearance_mode("dark") 
 
+# Diccionario para almacenar ventanas activas
+active_windows = {}
+
 # Variables de estado
 class AppState:
     running: bool = True
@@ -289,7 +292,12 @@ def create_server_interface() -> None:
 # Interfaz de desencriptación de archivos
 def open_file_interface(parent_window: customtkinter.CTk) -> None:
     """Crea la interfaz para desencriptar archivos de respaldo."""
+    if "decrypt_window" in active_windows and active_windows["decrypt_window"].winfo_exists():
+        active_windows["decrypt_window"].lift()
+        active_windows['decrypt_window'].focus_force()
+        return
     file_window = customtkinter.CTk()
+    active_windows["decrypt_window"] = file_window
     file_window.title("Desencriptar Archivo de Respaldo")
     center_window(file_window, 500, 400)
 
@@ -324,9 +332,11 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
     def select_file() -> None:
         nonlocal file_path
         selected_path = filedialog.askopenfilename(filetypes=[("7-Zip Files", "*.7z"), ("All Files", "*.*")])
+        parent = file_window
         if selected_path:
             file_path = selected_path
             file_label.configure(text=f"Archivo: {Path(selected_path).name}")
+            file_window.after(100, lambda: file_window.focus_force())
         else:
             file_path = ""
             file_label.configure(text="Ningún archivo seleccionado")
@@ -432,6 +442,7 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
     # Manejo del cierre de la ventana
     def on_closing() -> None:
         parent_window.deiconify()
+        active_windows.pop("decrypt_window", None)
         file_window.destroy()
 
     file_window.protocol("WM_DELETE_WINDOW", on_closing)
@@ -808,6 +819,11 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     
     def show_backup_history(label_widget: customtkinter.CTkLabel) -> None:
         """Muestra el historial de respaldos realizados."""
+        if "history_window" in active_windows and active_windows["history_window"].winfo_exists():
+            active_windows["history_window"].lift()
+            active_windows['history_window'].focus_force()
+            return
+        
         try:
             backup_dir = label_widget.cget("text")
             if not backup_dir:
@@ -835,11 +851,14 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             
             # Mostrar en ventana de diálogo
             history_window = customtkinter.CTkToplevel(root)
+            active_windows["history_window"] = history_window
             history_window.title("Historial de Respaldos")
             center_window(history_window, 600, 400)
             
             history_frame = customtkinter.CTkFrame(history_window)
             history_frame.pack(pady=10, padx=10, fill="both", expand=True)
+            history_window.transient(root)
+            history_window.grab_set()
             
             title_label = customtkinter.CTkLabel(
                 history_frame, 
@@ -864,14 +883,21 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     font=("Arial", 12)
                 )
                 item_label.pack(side="left", fill="x", expand=True, padx=5)
-                
+
+            def on_history_close() -> None:
+                """Maneja el cierre de la ventana de historial."""
+                active_windows.pop("history_window", None)
+                history_window.destroy() 
+
             close_button = customtkinter.CTkButton(
                 history_frame,
                 text="Cerrar",
-                command=history_window.destroy,
+                command=on_history_close,
                 fg_color="gray"
             )
             close_button.pack(pady=10)
+
+            history_window.protocol("WM_DELETE_WINDOW", on_history_close)           
             
         except ValueError as ve:
             messagebox.showinfo("Historial de Respaldos", str(ve))
