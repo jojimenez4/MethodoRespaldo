@@ -3,3 +3,6 @@ __pycache__/
 .vscode/launch.json
 .env
 output/
+status.json
+app.log
+server.json
