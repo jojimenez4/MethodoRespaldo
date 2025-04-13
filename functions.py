@@ -288,6 +288,8 @@ def backup_mysql_database(
         
         # Usar mysqldump para crear el respaldo
         logger.info(f"Iniciando respaldo SQL en {temp_backup_path}")
+        
+        # Construir comando mysqldump
         mysqldump_cmd = [
             str(mysql_bin_path / "mysqldump"),
             "-e", "-R",
@@ -296,6 +298,11 @@ def backup_mysql_database(
             DATABASE,
             f"--result-file={temp_backup_path}"
         ]
+        
+        # Crear información de startupinfo para ocultar ventanas
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
         
         # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
         safe_cmd = ' '.join(mysqldump_cmd).replace(decrypted_password, "********")
@@ -306,9 +313,11 @@ def backup_mysql_database(
             shell=False, 
             capture_output=True, 
             text=True,
-            check=False  # No lanzar excepción para manejarla nosotros
+            check=False,
+            startupinfo=startupinfo  # Añadir startupinfo para ocultar ventana
         )
         
+        # Verificar resultado
         if process.returncode != 0:
             logger.error(f"Error en mysqldump: {process.stderr}")
             raise subprocess.CalledProcessError(process.returncode, safe_cmd, 
@@ -336,7 +345,8 @@ def backup_mysql_database(
             shell=False, 
             capture_output=True, 
             text=True,
-            check=False  # No lanzar excepción para manejarla nosotros
+            check=False,
+            startupinfo=startupinfo  # Añadir startupinfo para ocultar ventana
         )
         
         if seven_zip_process.returncode != 0:

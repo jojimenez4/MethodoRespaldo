@@ -49,12 +49,34 @@ class BackupScheduler:
             **kwargs: Argumentos nombrados para la función de respaldo
         """
         with self._lock:
+            # Validar parámetros
+            try:
+                hours = int(hours)
+                minutes = int(minutes)
+            except (ValueError, TypeError):
+                logger.warning(f"Valores inválidos para programación: {hours}h:{minutes}m - Usando predeterminados")
+                hours = 4  # Predeterminado: cada 4 horas 
+                minutes = 0
+            
+            # Validar rango
+            if hours < 0 or hours > 23:
+                logger.warning(f"Valor de horas fuera de rango: {hours} - Corrigiendo")
+                hours = max(0, min(hours, 23))
+                
+            if minutes < 0 or minutes > 59:
+                logger.warning(f"Valor de minutos fuera de rango: {minutes} - Corrigiendo")
+                minutes = max(0, min(minutes, 59))
+            
             # Limpiar programaciones anteriores
             schedule.clear()
             
             # Calcular intervalo en segundos
             interval_seconds = (hours * 3600) + (minutes * 60)
-            logger.info(f"Programando respaldo cada {interval_seconds} segundos")
+            if interval_seconds <= 0:
+                logger.warning("Intervalo de respaldo demasiado pequeño, ajustando a 4 horas")
+                interval_seconds = 14400  # 4 horas como mínimo
+                
+            logger.info(f"Programando respaldo cada {interval_seconds} segundos ({hours}h:{minutes}m)")
             
             # Programar nueva tarea
             schedule.every(interval_seconds).seconds.do(
@@ -64,14 +86,25 @@ class BackupScheduler:
             # Marcar como programado
             self.scheduled = True
             
-            # Iniciar hilo de programación si no está activo
-            if self.scheduler_thread is None or not self.scheduler_thread.is_alive():
-                self.scheduler_thread = threading.Thread(
-                    target=self._run_scheduler, 
-                    daemon=True
-                )
-                self.scheduler_thread.start()
-    
+            # Programar un primer respaldo para prueba (después de 1 minuto)
+            if hours > 1 or (hours == 1 and minutes > 10):
+                logger.info("Programando respaldo inicial de prueba en 1 minuto")
+                schedule.every(1).minutes.do(
+                    lambda: backup_func(*args, **kwargs)
+                ).tag("test_backup")
+                
+                # Eliminar la tarea de prueba después de ejecutarse
+                def remove_test_task():
+                    try:
+                        for job in schedule.get_jobs("test_backup"):
+                            schedule.cancel_job(job)
+                        logger.info("Tarea de prueba eliminada")
+                    except Exception as e:
+                        logger.error(f"Error al eliminar tarea de prueba: {e}")
+                
+                # Programar eliminación de la tarea de prueba
+                schedule.every(2).minutes.do(remove_test_task).tag("cleanup")
+
     def _run_scheduler(self) -> None:
         """Ejecuta el programador de tareas en un bucle."""
         logger.info("Iniciando programador de respaldos")

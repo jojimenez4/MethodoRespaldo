@@ -11,6 +11,9 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from PIL import Image
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Callable
+from config_manager import ConfigManager
+from auth_manager import AuthManager
+from users_management import UserManagementWindow
 import logging
 
 from functions import (
@@ -77,7 +80,7 @@ def load_app_image(filename: str) -> Image.Image:
     return Image.open(image_path)
 
 # Interfaz de login
-def create_login_interface() -> None:
+def create_login_interface():
     """Crea la interfaz de inicio de sesión."""
     login_window = customtkinter.CTk()
     login_window.title("Login - Sistema de Respaldo")
@@ -86,7 +89,7 @@ def create_login_interface() -> None:
     # Variable para el modo oscuro/claro
     switch = customtkinter.StringVar(value="dark")
 
-    def switch_mode() -> None:
+    def switch_mode():
         """Cambia entre modo oscuro y claro."""
         if switch.get() == "dark":
             customtkinter.set_appearance_mode("light")
@@ -115,7 +118,6 @@ def create_login_interface() -> None:
     username_label = customtkinter.CTkLabel(frame, text="Usuario:", width=20)
     username_label.pack(pady=5)
     username_entry = customtkinter.CTkEntry(frame)
-    username_entry.insert(0, "admin")
     username_entry.pack(pady=5)
 
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
@@ -123,16 +125,32 @@ def create_login_interface() -> None:
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
 
+    # Mensaje de error (oculto inicialmente)
+    error_label = customtkinter.CTkLabel(frame, text="", text_color="red")
+    error_label.pack(pady=5)
+    error_label.configure(text="")  # Ocultar inicialmente
+
+    # Contador de intentos
+    login_attempts = {"count": 0}
+    
+    # Inicializar AuthManager
+    auth_manager = AuthManager()
+
     # Verificación de credenciales
-    def verify_login() -> None:
+    def verify_login():
         """Verifica las credenciales de inicio de sesión."""
         username = username_entry.get()
         password = password_entry.get()
         
-        # TODO: Implementar sistema de autenticación real
-        # En una aplicación de producción, deberíamos usar un sistema
-        # de autenticación más seguro, como bcrypt para hashear passwords
-        if username == "admin" and password == "1234":
+        # Validación básica
+        if not username or not password:
+            error_label.configure(text="Por favor, complete todos los campos")
+            return
+        
+        # Verificar con AuthManager
+        success, user_data = auth_manager.verify_credentials(username, password)
+        
+        if success:
             logger.info(f"Inicio de sesión exitoso: usuario {username}")
             login_window.destroy()
             
@@ -159,8 +177,31 @@ def create_login_interface() -> None:
             else:
                 create_server_interface()
         else:
-            logger.warning(f"Intento de inicio de sesión fallido: usuario {username}")
-            messagebox.showerror("Error", "Usuario o contraseña incorrectos.")
+            # Incrementar contador de intentos fallidos
+            login_attempts["count"] += 1
+            
+            # Mostrar mensaje de error
+            error_label.configure(text=f"Usuario o contraseña incorrectos. Intento {login_attempts['count']}/3")
+            
+            # Limpiar campo de contraseña
+            password_entry.delete(0, "end")
+            
+            # Bloquear temporalmente después de 3 intentos
+            if login_attempts["count"] >= 3:
+                error_label.configure(text="Demasiados intentos fallidos. Espere 30 segundos.")
+                username_entry.configure(state="disabled")
+                password_entry.configure(state="disabled")
+                login_button.configure(state="disabled")
+                
+                # Desbloquear después de 30 segundos
+                def unlock_login():
+                    login_attempts["count"] = 0
+                    error_label.configure(text="")
+                    username_entry.configure(state="normal")
+                    password_entry.configure(state="normal")
+                    login_button.configure(state="normal")
+                
+                login_window.after(30000, unlock_login)  # 30 segundos
 
     # Botón de inicio de sesión
     login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login, fg_color="green")
@@ -170,7 +211,7 @@ def create_login_interface() -> None:
     password_entry.bind("<Return>", lambda event: verify_login())
 
     # Manejo del cierre de la ventana
-    def on_closing() -> None:
+    def on_closing():
         AppState.running = False
         login_window.destroy()
 
@@ -571,6 +612,16 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     )
     execute_button.pack(pady=10)
 
+    # Botón para administrar usuarios
+    user_admin_button = customtkinter.CTkButton(
+        buttons_frame, 
+        text="👤 Administrar Usuarios", 
+        command=lambda: open_user_management(root), 
+        fg_color="DarkOrchid3", 
+        width=150
+    )
+    user_admin_button.pack(pady=5, anchor="e")
+
     # Estado de programación
     schedule_status = "No programado"
     if AppState.backup_hours is not None and AppState.backup_minutes is not None:
@@ -613,6 +664,9 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
                 return
 
+        # Inicializar ConfigManager para usar sus métodos seguros
+        config_manager = ConfigManager()
+
         # Creación de la ventana de progreso
         progress_window = customtkinter.CTkToplevel(root)
         progress_window.title("Realizando Respaldo")
@@ -651,11 +705,13 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
 
             if server_data["server_type"] == "MySQL Server (TCP/IP)":
                 try:
-                    # Actualizar el estado del programa
-                    program_state["running"] = True
-                    program_state["status"] = "in_progress"
-                    program_state["backup_dir"] = folder_path
-                    save_state(STATUS_PROGRAM, program_state)
+                    # Actualizar el estado del programa de manera segura usando ConfigManager
+                    config_manager.update_program_state(
+                        running=True,
+                        status="in_progress",
+                        backup_dir=folder_path,
+                        progress=0
+                    )
 
                     # Lanzar el respaldo en un hilo separado
                     def run_backup() -> None:
@@ -676,22 +732,35 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     
                     def completion_tasks() -> None:
                         update_progress(100, "Respaldo completado.")
-                        program_state["status"] = "completed"
-                        save_state(STATUS_PROGRAM, program_state)
+                        
+                        # Actualizar estado de manera segura
+                        config_manager.update_program_state(
+                            status="completed",
+                            client=server_data.get("client", "Cliente"),
+                            backup_dir=folder_path,
+                            amount=AppState.selected_amount,
+                            timestamp=datetime.datetime.now().isoformat(),
+                            progress=100
+                        )
                         
                         if progress_window.winfo_exists():
                             progress_window.destroy()
                         
                         messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
                         
+                        # Configurar programación si se solicitó
                         if backup_hours or backup_minutes:
-                            schedule_backup(backup_hours, backup_minutes)
+                            # Programar respaldo con ConfigManager
+                            config_manager.set_backup_schedule(
+                                hours=backup_hours if backup_hours is not None else 4,
+                                minutes=backup_minutes if backup_minutes is not None else 0,
+                                enabled=True
+                            )
+                            
+                            # Forzar guardado completo para asegurar que todos los campos están presentes
+                            config_manager.force_save_all()
+                            
                             ocultar_ventana()
-                            program_state["client"] = server_data["client"]
-                            program_state["backup_dir"] = folder_path
-                            program_state["amount"] = AppState.selected_amount
-                            program_state["timestamp"] = datetime.datetime.now().isoformat()
-                            save_state(STATUS_PROGRAM, program_state)
                             
                             # Actualizar etiqueta de programación
                             schedule_label.configure(
@@ -714,8 +783,10 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                             messagebox.showinfo("Info", "Respaldo automático no programado.")
                     
                     def handle_error(e: Exception) -> None:
-                        program_state["status"] = "error"
-                        save_state(STATUS_PROGRAM, program_state)
+                        config_manager.update_program_state(
+                            status="error",
+                            progress=0
+                        )
                         
                         if progress_window.winfo_exists():
                             progress_window.destroy()
@@ -728,8 +799,10 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     backup_thread.start()
                     
                 except Exception as e:
-                    program_state["status"] = "error"
-                    save_state(STATUS_PROGRAM, program_state)
+                    config_manager.update_program_state(
+                        status="error",
+                        progress=0
+                    )
                     
                     if progress_window.winfo_exists():
                         progress_window.destroy()
@@ -741,8 +814,15 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     progress_window.destroy()
                 messagebox.showerror("Error", "Tipo de servidor no soportado.")
         except Exception as e:
-            program_state["status"] = "error"
-            save_state(STATUS_PROGRAM, program_state)
+            try:
+                config_manager.update_program_state(
+                    status="error",
+                    progress=0
+                )
+            except:
+                # Si falla el ConfigManager, intentamos con la función básica
+                program_state["status"] = "error"
+                save_state(STATUS_PROGRAM, program_state)
             
             if progress_window and progress_window.winfo_exists():
                 progress_window.destroy()
@@ -1111,7 +1191,7 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
     )
     increase_button.pack(side="right", padx=0)
 
-    def save_advanced_settings() -> None:
+    def save_advanced_settings():
         """Guarda la configuración avanzada."""
         try:
             # Procesar tareas configuradas
@@ -1128,18 +1208,12 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
                     
                 AppState.task_configurations.append((str(task_hours).zfill(2), str(task_minutes).zfill(2)))
 
-            # Configurar tiempo de respaldo si hay tareas
-            if AppState.task_configurations:
-                AppState.set_backup_time(
-                    int(AppState.task_configurations[0][0]), 
-                    int(AppState.task_configurations[0][1])
-                )
-                AppState.set_scheduled(True)
-
-            # Configurar cantidad máxima de respaldos
+            # Configurar cantidad máxima de respaldos - PERMITIR CUALQUIER VALOR > 0
             selected_amount = spinbox_var.get()
-            if selected_amount <= 0:
-                raise ValueError("El valor de respaldos a mantener debe ser mayor que 0.")
+            if selected_amount <= 0:  # Solo validar que sea positivo
+                logger.warning(f"Valor de respaldos ({selected_amount}) debe ser mayor que 0. Ajustando.")
+                selected_amount = 5  # Valor predeterminado razonable
+                spinbox_var.set(5)
                 
             AppState.set_amount(selected_amount)
             
@@ -1147,15 +1221,51 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
             folder_path = rounded_label.cget("text")
             if not folder_path:
                 raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
-                
-            # Guardar configuración
-            program_state["amount"] = selected_amount
-            save_state(STATUS_PROGRAM, program_state)
-                
-            logger.info(f"Configuración avanzada guardada: {selected_amount} respaldos máximos")
+            
+            # Importar ConfigManager y preparar la configuración
+            from config_manager import ConfigManager
+            config_manager = ConfigManager()
+            
+            # Guardar toda la configuración de una vez
+            update_data = {
+                "amount": selected_amount,  # USAR EL VALOR CONFIGURADO SIN AJUSTAR
+                "backup_dir": folder_path
+            }
+            
+            # Si hay tareas programadas, incluir la configuración de tiempo
             if AppState.task_configurations:
-                logger.info(f"Tareas programadas: {AppState.task_configurations}")
+                hours = int(AppState.task_configurations[0][0])
+                minutes = int(AppState.task_configurations[0][1])
                 
+                # Actualizar estado en memoria
+                AppState.set_backup_time(hours, minutes)
+                AppState.set_scheduled(True)
+                
+                # Añadir configuración de tiempo al diccionario de actualización
+                update_data["backup_hours"] = hours
+                update_data["backup_minutes"] = minutes
+                update_data["scheduled"] = True
+                
+                logger.info(f"Guardando configuración de respaldo: hours={hours}, minutes={minutes}, amount={selected_amount}")
+            else:
+                # Si no hay tareas, usar configuración por defecto (4 horas)
+                logger.info("No hay tareas configuradas, configurando respaldo predeterminado (4 horas)")
+                update_data["backup_hours"] = 4
+                update_data["backup_minutes"] = 0
+                update_data["scheduled"] = True
+                AppState.set_backup_time(4, 0)
+                AppState.set_scheduled(True)
+            
+            # Actualizar todo de una vez
+            config_manager.update_program_state(**update_data)
+            
+            # Verificar que se guardó correctamente
+            config_manager.repair_state_file()  # Asegurar que todo se guardó
+            
+            # Verificar contenido del archivo guardado
+            state_after = config_manager.get_program_state()
+            logger.info(f"Estado después de guardar: {state_after}")
+            
             messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
             root.destroy()
             parent_window.deiconify()
@@ -1185,6 +1295,27 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
+
+def open_user_management(parent_window: customtkinter.CTk) -> None:
+    """Abre la ventana de gestión de usuarios."""
+    # Verificar si ya existe una ventana de gestión de usuarios abierta
+    if 'user_management_window' in active_windows and active_windows['user_management_window'].winfo_exists():
+        # Si existe, darle foco
+        active_windows['user_management_window'].lift()
+        active_windows['user_management_window'].focus_force()
+        return
+    
+    try:        
+        def on_close():
+            active_windows.pop('user_management_window', None)
+        
+        # Crear ventana de gestión de usuarios
+        user_mgmt = UserManagementWindow(parent_window, close_callback=on_close)
+        active_windows['user_management_window'] = user_mgmt.window
+        
+    except Exception as e:
+        logger.error(f"Error al abrir ventana de gestión de usuarios: {e}", exc_info=True)
+        messagebox.showerror("Error", f"No se pudo abrir la gestión de usuarios: {e}")
 
 def create_system_tray_icon() -> None:
     """Crea un ícono en la bandeja del sistema."""
