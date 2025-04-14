@@ -8,7 +8,7 @@ import pyodbc
 import logging
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, List, Generator
-from functions import decrypt, KEY, logger
+from functions import decrypt, KEY, USER, logger
 
 @contextmanager
 def mysql_connection(host: str, port: int, password: str, user: str, database: str) -> Generator[mysql.connector.connection.MySQLConnection, None, None]:
@@ -32,7 +32,7 @@ def mysql_connection(host: str, port: int, password: str, user: str, database: s
         connection = mysql.connector.connect(
             host=host,
             port=port,
-            user=user,
+            user=USER,
             password=decrypted_password,
             database=database,
             connection_timeout=60,  # Mayor timeout para conexiones lentas
