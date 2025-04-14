@@ -27,6 +27,7 @@ pyodbc==5.2.0
 pyparsing==3.2.3
 pystray==0.19.5
 python-dotenv==1.0.1
+pywin32==310
 pywin32-ctypes==0.2.3
 PyYAML==6.0.2
 requests==2.32.3

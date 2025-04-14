@@ -36,7 +36,6 @@ class AuthManager:
         if not self.users:
             self._create_default_users()
             
-        logger.debug(f"AuthManager inicializado. {len(self.users)} usuarios cargados.")
     
     def _load_users(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -67,7 +66,6 @@ class AuthManager:
             
             with open(self.users_file, 'w', encoding='utf-8') as f:
                 json.dump(self.users, f, ensure_ascii=False, indent=4)
-            logger.debug(f"Usuarios guardados en {self.users_file}")
             return True
         except Exception as e:
             logger.error(f"Error al guardar usuarios: {e}")
@@ -93,7 +91,7 @@ class AuthManager:
         
         self.users = default_users
         self._save_users()
-        logger.info(f"Usuarios predeterminados creados: {', '.join(default_users.keys())}")
+        logger.info(f"Usuarios predeterminados creados")
     
     def _hash_password(self, password: str) -> str:
         """

@@ -50,7 +50,6 @@ def mysql_connection(host: str, port: int, password: str, user: str, database: s
             try:
                 if connection.is_connected():
                     connection.close()
-                    logger.debug("Conexión MySQL cerrada correctamente")
             except Exception as e:
                 logger.error(f"Error al cerrar conexión MySQL: {e}")
 

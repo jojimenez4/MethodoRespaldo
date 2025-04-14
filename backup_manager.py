@@ -67,14 +67,7 @@ class BackupScheduler:
                         logger.warning("Encontrado archivo de bloqueo obsoleto. Forzando desbloqueo.")
                         self._release_process_lock()
                     else:
-                        # Leer el contenido para ver si hay información útil
-                        try:
-                            with open(self._lock_file_path, 'r') as f:
-                                lock_info = f.read().strip()
-                            logger.debug(f"Respaldo en ejecución por otro proceso: {lock_info}")
-                        except:
-                            logger.debug("Respaldo en ejecución por otro proceso")
-                        
+                        logger.warning("Otro proceso está ejecutando un respaldo. Esperando...")                       
                         # Esperar un tiempo antes de reintentar
                         time.sleep(5)
                         continue
@@ -683,7 +676,6 @@ class BackupManager:
             
             # No mostrar la contraseña en los logs
             safe_cmd = ' '.join(extract_cmd).replace(password, "********")
-            logger.debug(f"Ejecutando: {safe_cmd}")
             
             process = subprocess.run(
                 extract_cmd, 

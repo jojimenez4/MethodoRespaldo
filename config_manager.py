@@ -103,7 +103,6 @@ class ConfigManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 try:
                     state = json.load(f)
-                    logger.debug(f"Estado cargado desde {filepath}: {state}")
                     return state
                 except json.JSONDecodeError:
                     logger.error(f"Archivo {filepath} está corrupto, intentando reparar")
@@ -185,7 +184,6 @@ class ConfigManager:
             
             # Renombrar el archivo temporal
             temp_filepath.rename(filepath_obj)
-            logger.debug(f"Estado guardado en {filepath}")
             return True
         except Exception as e:
             logger.error(f"Error al guardar el estado en {filepath}: {e}", exc_info=True)
@@ -197,16 +195,12 @@ class ConfigManager:
             # Actualizar solo las claves proporcionadas
             for key, value in kwargs.items():
                 self.program_state[key] = value
-                logger.debug(f"Campo '{key}' actualizado a: {value}")
             
             # Asegurar que todos los campos estén presentes
             self._ensure_complete_state()
             
             # Guardar el estado actualizado
-            result = self.save_state(self.status_file, self.program_state)
-            if result:
-                logger.debug(f"Estado del programa actualizado con éxito")
-                
+            result = self.save_state(self.status_file, self.program_state)                
             return result
         except Exception as e:
             logger.error(f"Error al actualizar estado del programa: {e}", exc_info=True)
@@ -235,8 +229,6 @@ class ConfigManager:
             
             # Guardar los datos actualizados
             result = self.save_state(self.server_file, self.server_data)
-            if result:
-                logger.debug(f"Datos del servidor actualizados: {kwargs}")
             return result
         except Exception as e:
             logger.error(f"Error al actualizar datos del servidor: {e}", exc_info=True)

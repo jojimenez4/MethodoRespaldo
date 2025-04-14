@@ -73,7 +73,6 @@ def ensure_app_directories():
     for directory in directories:
         try:
             os.makedirs(directory, exist_ok=True)
-            logger.debug(f"Directorio asegurado: {directory}")
         except Exception as e:
             logger.error(f"Error al crear directorio {directory}: {e}")
 
@@ -347,8 +346,6 @@ def run_as_service():
         # Registrar estado actual para diagnóstico
         program_state = config_manager.get_program_state()
         server_data = config_manager.get_server_data()
-        logger.debug(f"Estado inicial: {program_state}")
-        logger.debug(f"Datos de servidor: {server_data}")
         
         # Marcar que el servicio está en ejecución
         config_manager.update_program_state(running=True)

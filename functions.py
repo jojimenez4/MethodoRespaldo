@@ -161,7 +161,6 @@ def mysql_connection(host: str, port: int, password: str) -> Generator[mysql.con
     finally:
         if connection and connection.is_connected():
             connection.close()
-            logger.debug("Conexión MySQL cerrada")
 
 def bd_connect_mysql(host: str, port: int, password: str) -> Tuple[str, bool]:
     """
@@ -482,7 +481,6 @@ def backup_mysql_database(
         # Intentar eliminar el directorio temporal si está vacío
         try:
             temp_dir.rmdir()
-            logger.debug(f"Directorio temporal eliminado: {temp_dir}")
         except:
             pass  # Ignorar errores al eliminar el directorio
         
@@ -756,7 +754,6 @@ def save_state(filepath: str, state: Dict[str, Any]) -> bool:
             filepath.unlink()  # Eliminar el original primero para evitar problemas en Windows
         
         temp_filepath.rename(filepath)
-        logger.debug(f"Estado guardado en {filepath}")
         return True
     except Exception as e:
         logger.error(f"Error al guardar el estado: {e}")
@@ -775,7 +772,6 @@ def load_state(filepath: str) -> Optional[Dict[str, Any]]:
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             state = json.load(f)
-        logger.debug(f"Estado cargado desde {filepath}")
         return state
     except FileNotFoundError:
         logger.warning(f"Archivo de estado {filepath} no encontrado, se creará uno nuevo")
@@ -833,7 +829,6 @@ def decrypt_backup_file(zip_path: str, password: str, output_dir: Optional[str] 
         
         # No mostrar la contraseña en los logs
         safe_cmd = ' '.join(extract_cmd).replace(password, "********")
-        logger.debug(f"Ejecutando: {safe_cmd}")
         
         process = subprocess.run(
             extract_cmd, 
@@ -928,14 +923,6 @@ def create_secure_temp_dir() -> Path:
             except Exception as perm_error:
                 logger.warning(f"No se pudieron establecer permisos explícitos: {perm_error}")
         
-        # Verificar permisos de escritura
-        test_file = app_temp_dir / "test_write.tmp"
-        with open(test_file, 'w') as f:
-            f.write("test")
-        if test_file.exists():
-            test_file.unlink()
-            logger.debug(f"Directorio temporal verificado con permisos de escritura: {app_temp_dir}")
-        
         return app_temp_dir
     except Exception as e:
         logger.error(f"Error al crear directorio temporal seguro: {e}")
@@ -962,17 +949,7 @@ def create_unique_temp_dir() -> Path:
     backup_temp_dir = base_temp / f"methodo_backup_{timestamp}_{unique_id}"
     
     try:
-        backup_temp_dir.mkdir(exist_ok=True)
-        logger.debug(f"Directorio temporal único creado: {backup_temp_dir}")
-        
-        # Verificar permisos de escritura creando un archivo de prueba
-        test_file = backup_temp_dir / "test_write.tmp"
-        with open(test_file, 'w') as f:
-            f.write("test")
-        if test_file.exists():
-            test_file.unlink()
-            logger.debug(f"Permisos de escritura verificados en directorio temporal: {backup_temp_dir}")
-        
+        backup_temp_dir.mkdir(exist_ok=True)        
         return backup_temp_dir
     except Exception as e:
         logger.error(f"Error al crear directorio temporal único: {e}")
