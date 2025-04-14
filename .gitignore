@@ -3,3 +3,14 @@ __pycache__/
 .vscode/launch.json
 .env
 output/
+app.log
+logs/
+compile.bat
+install_service.bat
+MethodoRespaldo.spec
+nssm.exe
+build/
+dist/
+users.json
+status.json
+server.json
