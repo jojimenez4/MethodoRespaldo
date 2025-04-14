@@ -17,10 +17,11 @@ from users_management import UserManagementWindow
 import logging
 
 from functions import (
-    encrypt, bd_connect_mysql, send_email, backup_mysql_database, 
+    encrypt, bd_connect_mysql, send_email,
     save_state, program_state, server_data_state, KEY, STATUS_PROGRAM, 
     SERVER_DATA, decrypt_backup_file, logger
 )
+from backup_manager import BackupManager
 
 # Configurar apariencia inicial
 customtkinter.set_appearance_mode("dark") 
@@ -493,6 +494,22 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
 def open_backup_interface(server_data: Dict[str, Any]) -> None:
     """Crea la interfaz principal para la gestión de respaldos."""
     global program_state
+
+    # Cargar estado de programación anterior y configurar
+    config_manager = ConfigManager()
+    program_state = config_manager.get_program_state()
+    
+    # Verificar si hay respaldos programados guardados
+    if program_state.get("scheduled", False):
+        backup_hours = program_state.get("backup_hours", 4)
+        backup_minutes = program_state.get("backup_minutes", 0)
+        
+        # Configurar estado
+        AppState.set_backup_time(backup_hours, backup_minutes)
+        AppState.set_scheduled(True)
+        AppState.selected_amount = program_state.get("amount", 5)
+        
+        logger.info(f"Cargada configuración de respaldo: {backup_hours}h:{backup_minutes}m")
     
     root = customtkinter.CTk()
     AppState.root_window = root
@@ -588,11 +605,14 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     )
     rounded_label.pack(side="left", padx=5, fill="x", expand=True)
 
+    def schedule_backup_wrapper(h, m):
+        schedule_backup(h, m)
+
     # Ahora definimos el botón de configuración avanzada
     advanced_settings_button = customtkinter.CTkButton(
         buttons_frame, 
         text="⚙ Configuración avanzada", 
-        command=lambda: open_advance_options(root, rounded_label), 
+        command=lambda: open_advance_options(root, rounded_label, schedule_backup_wrapper), 
         fg_color="DarkOrange3", 
         width=150
     )
@@ -641,11 +661,11 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
 
     # Función para ejecutar respaldo
     def execute_backup(
-        folder: str, 
-        server_data: Dict[str, Any], 
-        backup_hours: Optional[int], 
-        backup_minutes: Optional[int]
-    ) -> None:
+    folder: str, 
+    server_data: Dict[str, Any], 
+    backup_hours: Optional[int], 
+    backup_minutes: Optional[int]
+) -> None:
         """Ejecuta un respaldo de la base de datos."""
         nonlocal folder_path
         folder_path = folder
@@ -655,14 +675,32 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             return
             
         # Verificar directorio
-        if not os.path.isdir(folder_path):
+        try:
+            if not os.path.isdir(folder_path):
+                try:
+                    os.makedirs(folder_path, exist_ok=True)
+                    logger.info(f"Directorio creado: {folder_path}")
+                except Exception as e:
+                    logger.error(f"Error al crear directorio: {e}")
+                    messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
+                    return
+            
+            # Verificar permisos escribiendo un archivo de prueba
+            test_file = os.path.join(folder_path, "test_write.tmp")
             try:
-                os.makedirs(folder_path, exist_ok=True)
-                logger.info(f"Directorio creado: {folder_path}")
-            except Exception as e:
-                logger.error(f"Error al crear directorio: {e}")
-                messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                if os.path.exists(test_file):
+                    os.unlink(test_file)
+                logger.info(f"Permisos de escritura verificados en: {folder_path}")
+            except Exception as perm_error:
+                logger.error(f"Error de permisos de escritura: {perm_error}")
+                messagebox.showerror("Error", f"No se tienen permisos de escritura en el directorio: {perm_error}")
                 return
+        except Exception as dir_error:
+            logger.error(f"Error al verificar directorio: {dir_error}")
+            messagebox.showerror("Error", f"Error al verificar el directorio: {dir_error}")
+            return
 
         # Inicializar ConfigManager para usar sus métodos seguros
         config_manager = ConfigManager()
@@ -716,21 +754,28 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     # Lanzar el respaldo en un hilo separado
                     def run_backup() -> None:
                         try:
-                            backup_mysql_database(
+                            # Crear instancia de BackupManager en lugar de llamar a función
+                            backup_manager = BackupManager()
+                            result = backup_manager.backup_mysql_database(
                                 server_data["password"], 
                                 folder_path, 
-                                server_data["client"], 
-                                AppState.selected_amount, 
+                                server_data.get("client", "Cliente"), 
+                                AppState.selected_amount,
+                                server_data,  # Añadir server_data como parámetro
                                 update_callback=update_progress
                             )
                             
                             # Actualizar al completar en el hilo principal
-                            progress_window.after(0, lambda: completion_tasks())
+                            progress_window.after(0, lambda: completion_tasks(result))
                         except Exception as e:
                             # Manejar errores en el hilo principal
                             progress_window.after(0, lambda: handle_error(e))
                     
-                    def completion_tasks() -> None:
+                    def completion_tasks(result=True) -> None:
+                        if not result:
+                            handle_error(Exception("El proceso de respaldo falló."))
+                            return
+                            
                         update_progress(100, "Respaldo completado.")
                         
                         # Actualizar estado de manera segura
@@ -836,27 +881,85 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             logger.warning("Intento de programar respaldo con horas o minutos nulos")
             return
             
+        # Obtener estado actual para asegurar que tenemos valores válidos
+        current_folder_path = folder_path
+        current_server_data = server_data.copy() if server_data else None
+        
+        if not current_folder_path or not current_server_data:
+            logger.error("No se puede programar respaldo: faltan datos de ruta o servidor")
+            return
+        
         interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
         logger.info(f"Programando respaldo cada {interval_seconds} segundos")
         
         # Limpiar programaciones anteriores
         schedule.clear()
         
+        # Función de respaldo que captura el estado actual
+        def run_backup_task():
+            logger.info(f"Ejecutando tarea programada: respaldo cada {backup_hours}h:{backup_minutes}m")
+            return execute_programed_backup(current_folder_path, current_server_data)
+        
         # Programar nueva tarea
-        schedule.every(interval_seconds).seconds.do(
-            lambda: execute_programed_backup(folder_path, server_data)
-        )
+        job = schedule.every(interval_seconds).seconds.do(run_backup_task)
+        job.tag("backup_task")
         
         # Actualizar estado
         AppState.set_scheduled(True)
         AppState.set_backup_time(backup_hours, backup_minutes)
+        
+        logger.info(f"Respaldo programado con éxito: cada {backup_hours}h:{backup_minutes}m")
+        
+        # Iniciar thread si no está activo
+        if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+            AppState.scheduled_backup_thread = threading.Thread(
+                target=run_scheduler, 
+                daemon=True
+            )
+            AppState.scheduled_backup_thread.start()
+            logger.info("Thread de respaldos programados iniciado")
     
     def run_scheduler() -> None:
         """Ejecuta el programador de tareas."""
         logger.info("Iniciando programador de respaldos")
-        while AppState.running and AppState.scheduled:
-            schedule.run_pending()
-            time.sleep(1)
+        
+        try:
+            # Verificar que hay tareas programadas
+            jobs = list(schedule.jobs)
+            if not jobs:
+                logger.warning("No hay tareas programadas al iniciar run_scheduler")
+                
+                # Intentar recuperar configuración y reprogramar
+                from config_manager import ConfigManager
+                config_manager = ConfigManager()
+                program_state = config_manager.get_program_state()
+                
+                if program_state.get("scheduled", False):
+                    backup_hours = program_state.get("backup_hours", 4)
+                    backup_minutes = program_state.get("backup_minutes", 0)
+                    
+                    # Reprogramar con la configuración guardada
+                    schedule_backup(backup_hours, backup_minutes)
+                    logger.info(f"Reprogramado respaldo con configuración guardada: {backup_hours}h:{backup_minutes}m")
+            
+            # Bucle principal
+            while AppState.running and AppState.scheduled:
+                schedule.run_pending()
+                
+                # Verificar periódicamente si hay tareas
+                if not schedule.jobs:
+                    logger.warning("No hay tareas programadas durante la ejecución")
+                    
+                    # Intentar reprogramar con el estado actual
+                    if AppState.backup_hours is not None and AppState.backup_minutes is not None:
+                        schedule_backup(AppState.backup_hours, AppState.backup_minutes)
+                        logger.info(f"Reprogramado respaldo con estado actual: {AppState.backup_hours}h:{AppState.backup_minutes}m")
+                
+                time.sleep(1)
+                
+        except Exception as e:
+            logger.error(f"Error en programador de respaldos: {e}", exc_info=True)
+            
         logger.info("Programador de respaldos detenido")
 
     def execute_programed_backup(folder_path: str, server_data: Dict[str, Any]) -> None:
@@ -872,11 +975,39 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 return
                 
             if server_data["server_type"] == "MySQL Server (TCP/IP)":
-                result = backup_mysql_database(
+                # Verificar que el directorio existe
+                if not os.path.exists(folder_path):
+                    try:
+                        os.makedirs(folder_path, exist_ok=True)
+                        logger.info(f"Directorio de respaldo creado: {folder_path}")
+                    except Exception as dir_error:
+                        logger.error(f"Error al crear directorio de respaldo: {dir_error}")
+                        send_email(server_data.get("client", "Cliente"), 
+                                f"Error al crear directorio de respaldo: {dir_error}")
+                        return
+                        
+                # Verificar permisos
+                try:
+                    test_file = os.path.join(folder_path, "test_write.tmp")
+                    with open(test_file, 'w') as f:
+                        f.write("test")
+                    if os.path.exists(test_file):
+                        os.remove(test_file)
+                    logger.info("Permisos de escritura verificados en directorio de respaldo")
+                except Exception as perm_error:
+                    logger.error(f"Error de permisos en directorio de respaldo: {perm_error}")
+                    send_email(server_data.get("client", "Cliente"), 
+                            f"Error de permisos en directorio de respaldo: {perm_error}")
+                    return
+                    
+                # Crear instancia de BackupManager para el respaldo programado
+                backup_manager = BackupManager()
+                result = backup_manager.backup_mysql_database(
                     server_data["password"], 
                     folder_path, 
-                    server_data["client"], 
-                    AppState.selected_amount
+                    server_data.get("client", "Cliente"), 
+                    AppState.selected_amount,
+                    server_data  # Asegurarse de pasar server_data aquí
                 )
                 
                 if result:
@@ -1010,7 +1141,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
-def open_advance_options(parent_window: customtkinter.CTk, rounded_label: customtkinter.CTkLabel) -> None:
+def open_advance_options(parent_window: customtkinter.CTk, rounded_label: customtkinter.CTkLabel, schedule_func: Optional[Callable] = None) -> None:
     """Abre la ventana de opciones avanzadas."""
     # Si hay un respaldo programado, confirmar pausa
     if AppState.scheduled:
@@ -1246,7 +1377,11 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
                 update_data["backup_minutes"] = minutes
                 update_data["scheduled"] = True
                 
-                logger.info(f"Guardando configuración de respaldo: hours={hours}, minutes={minutes}, amount={selected_amount}")
+                if schedule_func:
+                    schedule_func(hours, minutes)  # Llamar a la función de programación si se proporciona
+                    logger.info(f"Respaldo programado cada {hours}h:{minutes}m")
+                else:
+                    logger.error("No se pudo programar el respaldo: función no disponible")
             else:
                 # Si no hay tareas, usar configuración por defecto (4 horas)
                 logger.info("No hay tareas configuradas, configurando respaldo predeterminado (4 horas)")

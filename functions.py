@@ -221,30 +221,42 @@ def bd_server_verify_sql_server(server: str, username: str, password: str) -> bo
         return False
 
 def backup_mysql_database(
+    self,
     password: str, 
     backup_dir: str, 
     client: str, 
     amount: int,
+    server_data: Dict[str, Any],
     update_callback: Optional[Callable[[int, str], None]] = None
 ) -> bool:
     """
-    Realiza un backup de la base de datos MySQL.
+    Realiza un respaldo de la base de datos MySQL.
     
     Args:
         password: Contraseña encriptada del servidor MySQL
         backup_dir: Directorio donde se almacenará el backup
         client: Nombre del cliente
         amount: Cantidad máxima de backups a mantener
+        server_data: Datos del servidor
         update_callback: Función de callback para actualizar el progreso
         
     Returns:
         True si el backup fue exitoso, False en caso contrario
     """
     try:
+        import time
+        import uuid
+        import tempfile
+        import subprocess
+        
         # Validar parámetros de entrada
         backup_path = Path(backup_dir)
         if not backup_path.is_dir():
-            raise ValueError(f"El directorio {backup_dir} no existe")
+            try:
+                backup_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Directorio de respaldo creado: {backup_dir}")
+            except Exception as e:
+                raise ValueError(f"No se pudo crear el directorio {backup_dir}: {e}")
         
         if not client:
             raise ValueError("Se requiere un nombre de cliente válido")
@@ -259,9 +271,6 @@ def backup_mysql_database(
         client = client.replace(" ", "_").replace("/", "_").replace("\\", "_")
         device = socket.gethostname()
         
-        backup_file_name = f"{client}_{device}_backup_{timestamp}.sql"
-        seven_zip_file_name = f"{client}_{device}_backup_{timestamp}.7z"
-        
         # Detectar rutas automáticamente
         mysql_bin_path = find_mysql_bin_path()
         seven_zip_path = find_7zip_path()
@@ -272,93 +281,210 @@ def backup_mysql_database(
         
         if not seven_zip_path:
             raise FileNotFoundError("No se pudo encontrar la instalación de 7-Zip")
-
-        # Comandos de backup
-        backup_file_path = backup_path / backup_file_name
-        seven_zip_file_path = backup_path / seven_zip_file_name
         
         # Cambiar al directorio de MySQL y ejecutar el backup
         if update_callback:
             update_callback(10, "Iniciando respaldo...")
         
-        # Crear directorio temporal para respaldo si no existe
-        temp_dir = Path("./temp")
+        # Crear directorio temporal único para este respaldo
+        unique_id = str(uuid.uuid4())[:8]
+        temp_dir = Path(tempfile.gettempdir()) / f"methodo_backup_{unique_id}"
         temp_dir.mkdir(exist_ok=True)
-        temp_backup_path = temp_dir / backup_file_name
         
-        # Usar mysqldump para crear el respaldo
+        # Usar un nombre único para el archivo temporal
+        temp_backup_name = f"{client}_{device}_backup_{timestamp}_{unique_id}.sql"
+        temp_backup_path = temp_dir / temp_backup_name
+        
         logger.info(f"Iniciando respaldo SQL en {temp_backup_path}")
         
-        # Construir comando mysqldump
+        
         mysqldump_cmd = [
             str(mysql_bin_path / "mysqldump"),
             "-e", "-R",
-            "-u", "root",
+            "-u", USER,
             f"-p{decrypted_password}",
             DATABASE,
             f"--result-file={temp_backup_path}"
         ]
         
-        # Crear información de startupinfo para ocultar ventanas
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        
         # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
         safe_cmd = ' '.join(mysqldump_cmd).replace(decrypted_password, "********")
         logger.info(f"Ejecutando: {safe_cmd}")
+        
+        startupinfo = None
+        if hasattr(subprocess, 'STARTUPINFO'):
+            # Crear información de startupinfo para ocultar ventanas en Windows
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
         
         process = subprocess.run(
             mysqldump_cmd, 
             shell=False, 
             capture_output=True, 
             text=True,
-            check=False,
-            startupinfo=startupinfo  # Añadir startupinfo para ocultar ventana
+            check=False,  # No lanzar excepción para manejarla nosotros
+            startupinfo=startupinfo,
+            timeout=600  # 10 minutos máximo
         )
         
-        # Verificar resultado
         if process.returncode != 0:
             logger.error(f"Error en mysqldump: {process.stderr}")
             raise subprocess.CalledProcessError(process.returncode, safe_cmd, 
                                               output=process.stdout, stderr=process.stderr)
         
+        # Esperar a que el proceso libere el archivo
+        time.sleep(1)
+        
+        # Verificar que el archivo se creó correctamente
+        if not temp_backup_path.exists() or temp_backup_path.stat().st_size == 0:
+            raise ValueError(f"No se pudo crear el archivo de respaldo: {temp_backup_path}")
+        
         if update_callback:
             update_callback(50, "Comprimiendo respaldo...")
-        
+
+        # Verificar que el directorio destino tenga permisos de escritura
+        try:
+            test_file = backup_path / "test_write.tmp"
+            with open(test_file, 'w') as f:
+                f.write("test")
+            if test_file.exists():
+                test_file.unlink()
+            logger.info(f"Permisos de escritura verificados en: {backup_path}")
+        except Exception as e:
+            logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
+            raise ValueError(f"No se tienen permisos de escritura en el directorio de respaldo: {backup_path}")
+
+        # Generar un nombre único para el archivo comprimido para evitar conflictos
+        timestamp_with_millis = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')[:18]
+        seven_zip_file_name = f"{client}_{device}_backup_{timestamp_with_millis}.7z"
+        seven_zip_file_path = backup_path / seven_zip_file_name
+
+        # Asegurarse de que no exista un archivo con el mismo nombre
+        if seven_zip_file_path.exists():
+            try:
+                # Intentar eliminar el archivo existente
+                seven_zip_file_path.unlink()
+                logger.info(f"Archivo existente eliminado: {seven_zip_file_path}")
+            except Exception as e:
+                # Si no se puede eliminar, usar un nombre alternativo
+                unique_id = str(uuid.uuid4())[:8]
+                seven_zip_file_name = f"{client}_{device}_backup_{timestamp_with_millis}_{unique_id}.7z"
+                seven_zip_file_path = backup_path / seven_zip_file_name
+                logger.warning(f"No se pudo eliminar archivo existente, usando nombre alternativo: {seven_zip_file_path}")
+
         # Comprimir con 7-Zip
         logger.info(f"Comprimiendo respaldo en {seven_zip_file_path}")
+
+        # Construir comando 7-Zip con opciones seguras
         compress_cmd = [
             str(seven_zip_path / "7z.exe"),
-            "a",
-            f"-p{BACKUP_PASSWORD}",
-            str(seven_zip_file_path),
-            str(temp_backup_path)
+            "a",                           # Añadir a archivo
+            "-y",                          # Asumir "sí" para todas las preguntas
+            f"-p{BACKUP_PASSWORD}",        # Contraseña
+            str(seven_zip_file_path),      # Archivo destino
+            str(temp_backup_path)          # Archivo a comprimir
         ]
-        
-        # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
+
+        # Ejecutar el comando de forma segura
         safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD, "********")
         logger.info(f"Ejecutando: {safe_compress_cmd}")
-        
-        seven_zip_process = subprocess.run(
-            compress_cmd, 
-            shell=False, 
-            capture_output=True, 
-            text=True,
-            check=False,
-            startupinfo=startupinfo  # Añadir startupinfo para ocultar ventana
-        )
-        
-        if seven_zip_process.returncode != 0:
-            logger.error(f"Error en 7-Zip: {seven_zip_process.stderr}")
-            raise subprocess.CalledProcessError(seven_zip_process.returncode, safe_compress_cmd, 
-                                              output=seven_zip_process.stdout, stderr=seven_zip_process.stderr)
-        
+
+        # Intentar comprimir con múltiples reintentos si es necesario
+        max_compression_retries = 3
+        for retry in range(max_compression_retries):
+            try:
+                seven_zip_process = subprocess.run(
+                    compress_cmd, 
+                    shell=False, 
+                    capture_output=True, 
+                    text=True,
+                    check=False,
+                    startupinfo=startupinfo,
+                    timeout=300  # 5 minutos máximo
+                )
+                
+                # Verificar resultado
+                if seven_zip_process.returncode == 0:
+                    logger.info("Compresión 7-Zip exitosa")
+                    break
+                else:
+                    # Si falló, pero estamos en el último intento, lanzar excepción
+                    if retry == max_compression_retries - 1:
+                        logger.error(f"Error en 7-Zip después de {max_compression_retries} intentos: {seven_zip_process.stderr}")
+                        raise subprocess.CalledProcessError(
+                            seven_zip_process.returncode, 
+                            safe_compress_cmd,
+                            output=seven_zip_process.stdout, 
+                            stderr=seven_zip_process.stderr
+                        )
+                    else:
+                        # Si no es el último intento, esperar y reintentar
+                        logger.warning(f"Error en 7-Zip (intento {retry+1}): {seven_zip_process.stderr}")
+                        time.sleep((retry + 1) * 2)  # Esperar más tiempo en cada reintento
+            except subprocess.TimeoutExpired:
+                logger.error("Timeout durante la compresión")
+                if retry == max_compression_retries - 1:
+                    raise ValueError("La compresión no pudo completarse por timeout después de múltiples intentos")
+                else:
+                    time.sleep((retry + 1) * 2)
+            except Exception as e:
+                logger.error(f"Excepción durante la compresión: {e}")
+                if retry == max_compression_retries - 1:
+                    raise
+                else:
+                    time.sleep((retry + 1) * 2)
+
+        # Verificar que el archivo comprimido se creó correctamente
+        if not seven_zip_file_path.exists():
+            raise ValueError(f"El archivo comprimido no fue creado: {seven_zip_file_path}")
+
+        # Verificar tamaño del archivo comprimido
+        file_size = seven_zip_file_path.stat().st_size
+        if file_size == 0:
+            raise ValueError(f"El archivo comprimido está vacío: {seven_zip_file_path}")
+
+        logger.info(f"Archivo comprimido creado: {seven_zip_file_path} ({file_size} bytes)")
+
         if update_callback:
             update_callback(70, "Eliminando archivo temporal...")
-        
-        # Eliminar archivo temporal
-        temp_backup_path.unlink()
+
+        # Eliminar archivo temporal con reintentos
+        max_delete_retries = 5
+        for retry in range(max_delete_retries):
+            try:
+                # Asegurar que los procesos han terminado
+                if 'seven_zip_process' in locals() and seven_zip_process:
+                    try:
+                        if hasattr(seven_zip_process, 'kill'):
+                            seven_zip_process.kill()
+                    except:
+                        pass
+                        
+                # Esperar un momento antes de intentar eliminar
+                time.sleep(1)
+                
+                if temp_backup_path.exists():
+                    temp_backup_path.unlink()
+                    logger.info(f"Archivo temporal eliminado: {temp_backup_path}")
+                    break
+                else:
+                    logger.info(f"Archivo temporal ya no existe: {temp_backup_path}")
+                    break
+            except Exception as e:
+                if retry < max_delete_retries - 1:
+                    logger.warning(f"Error al eliminar archivo temporal (intento {retry+1}): {e}")
+                    time.sleep((retry + 1) * 2)  # Aumentar tiempo de espera con cada reintento
+                else:
+                    logger.error(f"No se pudo eliminar el archivo temporal después de {max_delete_retries} intentos")
+                    # No fallar el respaldo por esto, continuar
+
+        # Intentar eliminar el directorio temporal si está vacío
+        try:
+            temp_dir.rmdir()
+            logger.debug(f"Directorio temporal eliminado: {temp_dir}")
+        except:
+            pass  # Ignorar errores al eliminar el directorio
         
         if update_callback:
             update_callback(100, "Respaldo completado.")
@@ -387,7 +513,7 @@ def backup_mysql_database(
 
 def find_mysql_bin_path() -> Optional[Path]:
     """
-    Busca la ruta de instalación de MySQL.
+    Busca la ruta de instalación de MySQL de manera más exhaustiva.
     
     Returns:
         Path a la carpeta bin de MySQL o None si no se encuentra
@@ -395,51 +521,126 @@ def find_mysql_bin_path() -> Optional[Path]:
     common_paths = [
         Path("C:/Program Files/MySQL/MySQL Server 8.0/bin"),
         Path("C:/Program Files/MySQL/MySQL Server 5.7/bin"),
-        Path("C:/mysql/bin")
+        Path("C:/Program Files (x86)/MySQL/MySQL Server 8.0/bin"),
+        Path("C:/Program Files (x86)/MySQL/MySQL Server 5.7/bin"),
+        Path("C:/mysql/bin"),
+        Path("C:/xampp/mysql/bin")
     ]
+    
+    # Buscar versiones adicionales de MySQL
+    for i in range(0, 20):  # Buscar versiones desde 8.0 hasta 8.19
+        version = f"8.{i}"
+        common_paths.append(Path(f"C:/Program Files/MySQL/MySQL Server {version}/bin"))
+        common_paths.append(Path(f"C:/Program Files (x86)/MySQL/MySQL Server {version}/bin"))
     
     # Buscar en rutas comunes
     for path in common_paths:
         if path.exists() and (path / "mysqldump.exe").exists():
+            logger.info(f"MySQL encontrado en: {path}")
             return path
     
     # Buscar en PATH del sistema
     try:
+        import shutil
+        mysqldump_path = shutil.which("mysqldump")
+        if mysqldump_path:
+            path = Path(mysqldump_path).parent
+            logger.info(f"MySQL encontrado en PATH: {path}")
+            return path
+        
+        # Intentar con where en Windows
         result = subprocess.run(["where", "mysqldump"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             path = Path(result.stdout.strip()).parent
+            logger.info(f"MySQL encontrado con 'where': {path}")
             return path
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Error al buscar MySQL en PATH: {e}")
+    
+    # Buscar en el registro de Windows
+    try:
+        import winreg
+        for hive in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            for key_path in [
+                r"SOFTWARE\MySQL AB",
+                r"SOFTWARE\MySQL AB\MySQL Server 8.0",
+                r"SOFTWARE\Wow6432Node\MySQL AB\MySQL Server 8.0"
+            ]:
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        install_dir, _ = winreg.QueryValueEx(key, "Location")
+                        if install_dir:
+                            bin_path = Path(install_dir) / "bin"
+                            if bin_path.exists() and (bin_path / "mysqldump.exe").exists():
+                                logger.info(f"MySQL encontrado en registro: {bin_path}")
+                                return bin_path
+                except:
+                    continue
+    except:
         pass
     
+    logger.warning("No se encontró la instalación de MySQL")
     return None
 
 def find_7zip_path() -> Optional[Path]:
     """
-    Busca la ruta de instalación de 7-Zip.
+    Busca la ruta de instalación de 7-Zip de manera más exhaustiva.
     
     Returns:
         Path a la carpeta de 7-Zip o None si no se encuentra
     """
     common_paths = [
         Path("C:/Program Files/7-Zip"),
+        Path("C:/Program Files (x86)/7-Zip"),
         Path("C:/7-Zip")
     ]
     
     # Buscar en rutas comunes
     for path in common_paths:
         if path.exists() and (path / "7z.exe").exists():
+            logger.info(f"7-Zip encontrado en: {path}")
             return path
     
     # Buscar en PATH del sistema
     try:
+        import shutil
+        sevenzip_path = shutil.which("7z.exe")
+        if sevenzip_path:
+            path = Path(sevenzip_path).parent
+            logger.info(f"7-Zip encontrado en PATH: {path}")
+            return path
+        
+        # Intentar con where en Windows
         result = subprocess.run(["where", "7z.exe"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             path = Path(result.stdout.strip()).parent
+            logger.info(f"7-Zip encontrado con 'where': {path}")
             return path
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Error al buscar 7-Zip en PATH: {e}")
+    
+    # Buscar en el registro de Windows
+    try:
+        import winreg
+        for hive in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            for key_path in [
+                r"SOFTWARE\7-Zip",
+                r"SOFTWARE\Wow6432Node\7-Zip"
+            ]:
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        install_dir, _ = winreg.QueryValueEx(key, "Path")
+                        if install_dir:
+                            path = Path(install_dir)
+                            if path.exists() and (path / "7z.exe").exists():
+                                logger.info(f"7-Zip encontrado en registro: {path}")
+                                return path
+                except:
+                    continue
+    except:
         pass
     
+    logger.warning("No se encontró la instalación de 7-Zip")
     return None
 
 def send_email(client: str, message: str) -> bool:
@@ -656,3 +857,124 @@ def decrypt_backup_file(zip_path: str, password: str, output_dir: Optional[str] 
 # Inicializar estados
 program_state = load_state(STATUS_PROGRAM) or {}
 server_data_state = load_state(SERVER_DATA) or {}
+
+def create_secure_temp_dir() -> Path:
+    """
+    Crea un directorio temporal seguro con permisos adecuados.
+    
+    Returns:
+        Path al directorio temporal
+    """
+    import tempfile
+    import os
+    import uuid
+    from pathlib import Path
+    
+    # Crear un nombre único para el directorio
+    unique_id = str(uuid.uuid4())[:8]
+    temp_base = Path(tempfile.gettempdir())
+    
+    # Crear un directorio específico para la aplicación
+    app_temp_dir = temp_base / f"methodo_backup_{unique_id}"
+    
+    try:
+        # Crear directorio con permisos explícitos si es posible
+        app_temp_dir.mkdir(exist_ok=True)
+        
+        # En Windows, intentar establecer permisos si están disponibles los módulos
+        if os.name == 'nt':
+            try:
+                # Intentar importar módulos sin causar error si no están disponibles
+                win32security_imported = False
+                try:
+                    import win32security
+                    import ntsecuritycon as con
+                    import win32file
+                    win32security_imported = True
+                except ImportError:
+                    logger.debug("Módulos win32security no disponibles, continuando sin establecer permisos explícitos")
+                
+                # Solo intentar establecer permisos si se importaron los módulos
+                if win32security_imported:
+                    # Obtener el SID del usuario actual
+                    username = os.environ.get('USERNAME', 'SYSTEM')
+                    domain = os.environ.get('USERDOMAIN', '')
+                    
+                    try:
+                        # Intentar obtener SID del usuario actual o SYSTEM
+                        sid, _, _ = win32security.LookupAccountName(domain, username)
+                    except:
+                        # Usar SYSTEM si falla
+                        sid, _, _ = win32security.LookupAccountName('', 'SYSTEM')
+                    
+                    # Crear un nuevo descriptor de seguridad
+                    security_descriptor = win32security.SECURITY_DESCRIPTOR()
+                    acl = win32security.ACL()
+                    
+                    # Dar permisos completos al usuario actual o SYSTEM
+                    acl.AddAccessAllowedAce(win32security.ACL_REVISION, con.FILE_ALL_ACCESS, sid)
+                    
+                    # Aplicar ACL al descriptor de seguridad
+                    security_descriptor.SetSecurityDescriptorDacl(1, acl, 0)
+                    
+                    # Aplicar descriptor de seguridad al directorio
+                    win32security.SetFileSecurity(
+                        str(app_temp_dir), 
+                        win32security.DACL_SECURITY_INFORMATION,
+                        security_descriptor
+                    )
+                    
+                    logger.debug(f"Permisos explícitos establecidos para el directorio temporal: {app_temp_dir}")
+            except Exception as perm_error:
+                logger.warning(f"No se pudieron establecer permisos explícitos: {perm_error}")
+        
+        # Verificar permisos de escritura
+        test_file = app_temp_dir / "test_write.tmp"
+        with open(test_file, 'w') as f:
+            f.write("test")
+        if test_file.exists():
+            test_file.unlink()
+            logger.debug(f"Directorio temporal verificado con permisos de escritura: {app_temp_dir}")
+        
+        return app_temp_dir
+    except Exception as e:
+        logger.error(f"Error al crear directorio temporal seguro: {e}")
+        # Fallback al directorio temporal predeterminado
+        return Path(tempfile.gettempdir())
+    
+def create_unique_temp_dir() -> Path:
+    """
+    Crea un directorio temporal único para evitar conflictos.
+    
+    Returns:
+        Path al directorio temporal creado
+    """
+    import tempfile
+    import uuid
+    from pathlib import Path
+    
+    # Crear un nombre único para el directorio
+    unique_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    base_temp = Path(tempfile.gettempdir())
+    
+    # Crear un directorio específico para este respaldo
+    backup_temp_dir = base_temp / f"methodo_backup_{timestamp}_{unique_id}"
+    
+    try:
+        backup_temp_dir.mkdir(exist_ok=True)
+        logger.debug(f"Directorio temporal único creado: {backup_temp_dir}")
+        
+        # Verificar permisos de escritura creando un archivo de prueba
+        test_file = backup_temp_dir / "test_write.tmp"
+        with open(test_file, 'w') as f:
+            f.write("test")
+        if test_file.exists():
+            test_file.unlink()
+            logger.debug(f"Permisos de escritura verificados en directorio temporal: {backup_temp_dir}")
+        
+        return backup_temp_dir
+    except Exception as e:
+        logger.error(f"Error al crear directorio temporal único: {e}")
+        # En caso de error, usar el directorio temporal del sistema
+        return Path(tempfile.gettempdir())

@@ -27,22 +27,32 @@ def mysql_connection(host: str, port: int, password: str, user: str, database: s
     """
     connection = None
     try:
+        # Incluir parámetros adicionales para mejorar la estabilidad
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         connection = mysql.connector.connect(
             host=host,
             port=port,
             user=user,
             password=decrypted_password,
-            database=database
+            database=database,
+            connection_timeout=60,  # Mayor timeout para conexiones lentas
+            autocommit=True,        # Evitar problemas de transacciones
+            use_pure=True,          # Usar implementación pura de Python para mayor compatibilidad
+            auth_plugin='mysql_native_password'  # Especificar plugin de autenticación
         )
         yield connection
     except mysql.connector.Error as err:
         logger.error(f"Error de conexión MySQL: {err}")
         raise
     finally:
-        if connection and connection.is_connected():
-            connection.close()
-            logger.debug("Conexión MySQL cerrada")
+        # Asegurar cierre seguro de la conexión
+        if connection:
+            try:
+                if connection.is_connected():
+                    connection.close()
+                    logger.debug("Conexión MySQL cerrada correctamente")
+            except Exception as e:
+                logger.error(f"Error al cerrar conexión MySQL: {e}")
 
 class DatabaseManager:
     """Clase para gestionar operaciones de base de datos."""

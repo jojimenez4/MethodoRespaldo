@@ -4,6 +4,7 @@ import argparse
 import os
 import time
 import datetime
+import schedule
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -145,10 +146,26 @@ def start_scheduled_backups():
             # Actualizar estado
             config_manager.update_program_state(backup_dir=backup_dir)
         
-        # Asegurar que el directorio existe
+        # Asegurar que el directorio existe con permisos adecuados
         try:
+            # Probar crear el directorio con permisos explícitos
             os.makedirs(backup_dir, exist_ok=True)
             logger.info(f"Directorio de respaldo verificado: {backup_dir}")
+            
+            # Verificar permisos intentando escribir un archivo temporal
+            test_file = os.path.join(backup_dir, "test_write.tmp")
+            try:
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.remove(test_file)
+                logger.info(f"Permiso de escritura en directorio verificado")
+            except Exception as write_error:
+                logger.error(f"Error de permisos de escritura en {backup_dir}: {write_error}")
+                # Intentar usar un directorio alternativo
+                backup_dir = os.path.join(APP_DIR, "backups")
+                os.makedirs(backup_dir, exist_ok=True)
+                logger.info(f"Cambiando a directorio de respaldo alternativo: {backup_dir}")
+                config_manager.update_program_state(backup_dir=backup_dir)
         except Exception as e:
             logger.error(f"Error al verificar directorio de respaldo: {e}")
             # Intentar usar un directorio alternativo
@@ -157,73 +174,103 @@ def start_scheduled_backups():
             logger.info(f"Usando directorio de respaldo alternativo: {backup_dir}")
             config_manager.update_program_state(backup_dir=backup_dir)
         
+        # Verificar datos del servidor
+        server_data = config_manager.get_server_data()
+        if not server_data:
+            logger.error("No hay datos de servidor configurados")
+            return False
+            
+        if not server_data.get("password"):
+            logger.error("Contraseña de servidor no configurada")
+            return False
+            
+        if not server_data.get("client"):
+            logger.warning("Nombre de cliente no configurado")
+            server_data["client"] = "Cliente_Predeterminado"
+            config_manager.update_server_data(client="Cliente_Predeterminado")
+        
         # Configurar programador con comprobación previa
         backup_manager = BackupManager()
         
         # Función que verifica condiciones antes de ejecutar respaldo
         def execute_backup_safely():
             # Recargar configuración cada vez
-            current_state = config_manager.get_program_state()
-            current_server_data = config_manager.get_server_data()
-            
-            # Verificar si hay datos suficientes para el respaldo
-            if not current_server_data.get("password") or not current_server_data.get("client"):
-                logger.warning("Datos de servidor insuficientes para ejecutar respaldo")
-                return False
-            
-            # Ejecutar respaldo
             try:
+                current_state = config_manager.get_program_state()
+                current_server_data = config_manager.get_server_data()
+                
+                # Verificar si hay datos suficientes para el respaldo
+                if not current_server_data.get("password") or not current_server_data.get("client"):
+                    logger.warning("Datos de servidor insuficientes para ejecutar respaldo")
+                    return False
+                
                 # Hacer copia local de los parámetros importantes para evitar referencias perdidas
-                password = current_server_data.get("password", "")
-                backup_directory = current_state.get("backup_dir", backup_dir)
-                client_name = current_server_data.get("client", "Cliente")
-                amount_value = current_state.get("amount", 5)
-                server_data_copy = current_server_data.copy()
-                
-                # Registrar inicio de respaldo
-                logger.info(f"Iniciando respaldo programado para {client_name} en {backup_directory}")
-                
-                # Actualizar estado antes de ejecutar
-                config_manager.update_program_state(
-                    running=True,
-                    status="in_progress",
-                    timestamp=datetime.datetime.now().isoformat()
-                )
-                
-                # Ejecutar respaldo
-                result = backup_manager.backup_mysql_database(
-                    password,
-                    backup_directory,
-                    client_name,
-                    amount_value,
-                    server_data_copy
-                )
-                
-                # Actualizar estado al finalizar
-                if result:
+                try:
+                    password = current_server_data.get("password", "")
+                    backup_directory = current_state.get("backup_dir", backup_dir)
+                    client_name = current_server_data.get("client", "Cliente")
+                    amount_value = current_state.get("amount", 5)
+                    server_data_copy = current_server_data.copy()
+                    
+                    # Verificar que el directorio existe y se puede escribir
+                    try:
+                        os.makedirs(backup_directory, exist_ok=True)
+                        test_file = os.path.join(backup_directory, "test_write.tmp")
+                        with open(test_file, 'w') as f:
+                            f.write("test")
+                        if os.path.exists(test_file):
+                            os.remove(test_file)
+                        logger.info(f"Directorio de respaldo verificado con permisos: {backup_directory}")
+                    except Exception as dir_error:
+                        logger.error(f"Error de permisos en directorio de respaldo: {dir_error}")
+                        return False
+                    
+                    # Registrar inicio de respaldo
+                    logger.info(f"Iniciando respaldo programado para {client_name} en {backup_directory}")
+                    
+                    # Actualizar estado antes de ejecutar
                     config_manager.update_program_state(
-                        status="completed",
+                        running=True,
+                        status="in_progress",
+                        timestamp=datetime.datetime.now().isoformat()
+                    )
+                    
+                    # Ejecutar respaldo
+                    result = backup_manager.backup_mysql_database(
+                        password,
+                        backup_directory,
+                        client_name,
+                        amount_value,
+                        server_data_copy
+                    )
+                    
+                    # Actualizar estado al finalizar
+                    if result:
+                        config_manager.update_program_state(
+                            status="completed",
+                            running=True
+                        )
+                        logger.info(f"Respaldo programado completado exitosamente")
+                    else:
+                        config_manager.update_program_state(
+                            status="error",
+                            running=True
+                        )
+                        logger.error("Respaldo programado falló")
+                    
+                    # Forzar que todos los campos estén presentes
+                    config_manager.force_save_all()
+                    
+                    return result
+                except Exception as exec_error:
+                    logger.error(f"Error durante la ejecución del respaldo: {exec_error}", exc_info=True)
+                    config_manager.update_program_state(
+                        status="error", 
                         running=True
                     )
-                    logger.info(f"Respaldo programado completado exitosamente")
-                else:
-                    config_manager.update_program_state(
-                        status="error",
-                        running=True
-                    )
-                    logger.error("Respaldo programado falló")
-                
-                # Forzar que todos los campos estén presentes
-                config_manager.force_save_all()
-                
-                return result
+                    return False
             except Exception as e:
-                logger.error(f"Error al ejecutar respaldo programado: {e}", exc_info=True)
-                config_manager.update_program_state(
-                    status="error",
-                    running=True
-                )
-                config_manager.force_save_all()
+                logger.error(f"Error al preparar respaldo programado: {e}", exc_info=True)
                 return False
         
         # Programar respaldo con la función segura
@@ -246,6 +293,12 @@ def start_scheduled_backups():
             backup_manager.scheduler.schedule_backup(4, 0, execute_backup_safely)
             logger.info("Respaldos programados iniciados con configuración predeterminada: cada 4h:0m")
         
+        # Verificar que el scheduler está en funcionamiento
+        if not backup_manager.scheduler.is_scheduled():
+            logger.error("El scheduler no se inició correctamente")
+            return False
+            
+        logger.info("Scheduler iniciado correctamente")
         return True
     except Exception as e:
         logger.error(f"Error al iniciar respaldos programados: {e}", exc_info=True)
@@ -265,20 +318,122 @@ def run_as_service():
         for handler in list(logger.handlers):
             if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
                 logger.removeHandler(handler)
+                
+        # Aumentar nivel de detalle del logging en modo servicio
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Configuración de logging en modo servicio completada")
     except Exception as e:
         # No podemos usar logger aquí si falló la configuración
         print(f"Error al configurar logs de servicio: {e}")
     
+    # Verificar y eliminar archivos de bloqueo obsoletos al inicio
     try:
+        lock_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup_lock.txt")
+        if os.path.exists(lock_file_path):
+            logger.warning("Eliminando archivo de bloqueo antiguo al iniciar el servicio")
+            os.remove(lock_file_path)
+    except Exception as lock_error:
+        logger.error(f"Error al eliminar archivo de bloqueo antiguo: {lock_error}")
+    
+    try:
+        # Inicializar administradores de configuración y respaldo
+        logger.debug("Inicializando ConfigManager para modo servicio")
+        config_manager = ConfigManager()
+        
+        # Forzar reparación del archivo de estado antes de comenzar
+        logger.debug("Reparando archivo de estado")
+        config_manager.repair_state_file()
+        
+        # Registrar estado actual para diagnóstico
+        program_state = config_manager.get_program_state()
+        server_data = config_manager.get_server_data()
+        logger.debug(f"Estado inicial: {program_state}")
+        logger.debug(f"Datos de servidor: {server_data}")
+        
+        # Marcar que el servicio está en ejecución
+        config_manager.update_program_state(running=True)
+        
+        # Verificar datos críticos
+        if not server_data:
+            logger.error("No hay datos de servidor configurados. El servicio no puede iniciar respaldos.")
+            # Intentar crear un archivo server.json básico
+            if "password" not in server_data:
+                logger.warning("Datos de servidor incompletos. Se necesita configurar la aplicación en modo GUI primero.")
+        
         # Iniciar programador de respaldos
         success = start_scheduled_backups()
         if success:
             logger.info("Servicio de respaldo iniciado correctamente")
             
-            # Mantener el programa en ejecución
+            # Variable de control para reintentos
+            consecutive_errors = 0
+            last_error_time = 0
+            
+            # Mantener el programa en ejecución con reintentos en caso de errores
             while True:
-                time.sleep(60)  # Dormir para no consumir CPU
-                
+                try:
+                    # Verificar si hay tareas pendientes y ejecutarlas
+                    schedule.run_pending()
+                    
+                    # Si llegamos aquí sin errores, resetear contador
+                    if consecutive_errors > 0:
+                        logger.info(f"Recuperado después de {consecutive_errors} errores consecutivos")
+                        consecutive_errors = 0
+                    
+                    # Dormir para no consumir CPU
+                    time.sleep(10)  # Revisamos cada 10 segundos (más frecuente que 60)
+                    
+                    # Cada 5 minutos, verificar que todo esté bien
+                    current_time = time.time()
+                    if current_time - last_error_time > 300:  # 5 minutos
+                        last_error_time = current_time
+                        
+                        # Verificar y reparar estado
+                        logger.debug("Verificación periódica de estado")
+                        
+                        # Recargar estado
+                        program_state = config_manager.get_program_state()
+                        server_data = config_manager.get_server_data()
+                        
+                        # Asegurar que seguimos programados
+                        if not program_state.get("scheduled", False):
+                            logger.warning("Estado de programación perdido. Reactivando...")
+                            config_manager.update_program_state(scheduled=True)
+                            # Reiniciar scheduler
+                            try:
+                                success = start_scheduled_backups()
+                                if success:
+                                    logger.info("Scheduler reiniciado con éxito")
+                                else:
+                                    logger.error("Error al reiniciar scheduler")
+                            except Exception as scheduler_error:
+                                logger.error(f"Error al reiniciar scheduler: {scheduler_error}", exc_info=True)
+                                
+                except KeyboardInterrupt:
+                    logger.info("Servicio detenido por señal de interrupción")
+                    return 0
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.error(f"Error en bucle principal del servicio: {e}", exc_info=True)
+                    
+                    if consecutive_errors >= 5:
+                        # Después de 5 errores consecutivos, intentar reparar la configuración
+                        try:
+                            logger.warning("Múltiples errores detectados, intentando reparar configuración")
+                            config_manager.repair_state_file()
+                            # Reiniciar scheduler
+                            success = start_scheduled_backups()
+                            if success:
+                                logger.info("Configuración reparada y scheduler reiniciado")
+                                consecutive_errors = 0  # Resetear contador
+                            else:
+                                logger.error("Error al reparar configuración")
+                        except Exception as repair_error:
+                            logger.critical(f"Error al intentar reparar: {repair_error}", exc_info=True)
+                    
+                    # Esperar antes del siguiente intento (tiempo creciente con el número de errores)
+                    backoff_time = min(60, 5 * consecutive_errors)  # Máximo 60 segundos
+                    time.sleep(backoff_time)
         else:
             logger.error("No se pudo iniciar el servicio de respaldo")
             return 1
@@ -288,6 +443,7 @@ def run_as_service():
     except Exception as e:
         logger.critical(f"Error fatal en el servicio: {e}", exc_info=True)
         return 1
+
 
 def run_backup_immediate():
     """Ejecuta un respaldo inmediato usando la configuración guardada."""
