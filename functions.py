@@ -654,8 +654,8 @@ def send_email(client: str, message: str) -> bool:
     """
 
     # Información de configuración del correo
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 587
+    smtp_server = "webmail.methodo.cl"
+    smtp_port = 25
     
     try:
         # Verificar que tengamos credenciales
@@ -666,7 +666,6 @@ def send_email(client: str, message: str) -> bool:
         # Usar with para asegurar que se cierre la conexión
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.ehlo()
-            server.starttls()
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             
             # Mejorar el formato del asunto según el contenido

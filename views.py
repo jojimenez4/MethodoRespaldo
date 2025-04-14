@@ -632,15 +632,15 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     )
     execute_button.pack(pady=10)
 
-    # Botón para administrar usuarios
-    user_admin_button = customtkinter.CTkButton(
-        buttons_frame, 
-        text="👤 Administrar Usuarios", 
-        command=lambda: open_user_management(root), 
-        fg_color="DarkOrchid3", 
-        width=150
-    )
-    user_admin_button.pack(pady=5, anchor="e")
+    # # Botón para administrar usuarios
+    # user_admin_button = customtkinter.CTkButton(
+    #     buttons_frame, 
+    #     text="👤 Administrar Usuarios", 
+    #     command=lambda: open_user_management(root), 
+    #     fg_color="DarkOrchid3", 
+    #     width=150
+    # )
+    # user_admin_button.pack(pady=5, anchor="e")
 
     # Estado de programación
     schedule_status = "No programado"
