@@ -1118,12 +1118,22 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
 
     def on_closing() -> None:
         """Maneja el cierre de la ventana principal."""
+        if "decrypt_window" in active_windows and active_windows["decrypt_window"].winfo_exists():
+            messagebox.showwarning(
+            "Ventana pendiente",
+            "No se puede cerrar la aplicación hasta que cierre la ventana de desencriptar."
+            )
+            active_windows["decrypt_window"].lift()
+            active_windows["decrypt_window"].focus_force()
+            return
+        
         if AppState.scheduled:
             if not messagebox.askyesno(
                 "Confirmar salida", 
                 "Hay respaldos programados en ejecución. ¿Desea cerrar la aplicación?"
             ):
                 return
+              
         
         AppState.running = False
         AppState.scheduled = False
