@@ -209,7 +209,7 @@ def create_login_interface():
                     password_entry.configure(state="normal")
                     login_button.configure(state="normal")
                 
-                login_window.after(30000, unlock_login)  # 30 segundos
+                login_window.after(30000, unlock_login)
 
     # Botón de inicio de sesión
     login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login, fg_color="green")
@@ -1406,7 +1406,7 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
             
             # Verificar contenido del archivo guardado
             state_after = config_manager.get_program_state()
-            logger.info(f"Estado después de guardar: {state_after}")
+            logger.info(f"Configuración guardada exitosamente")
             
             messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
             root.destroy()

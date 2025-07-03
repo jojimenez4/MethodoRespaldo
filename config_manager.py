@@ -284,12 +284,8 @@ class ConfigManager:
     def force_save_all(self) -> bool:
         """
         Fuerza el guardado completo del estado actual en el archivo.
-        Útil para asegurar que todos los campos estén presentes.
-        
-        Returns:
-            True si la operación fue exitosa, False en caso contrario
         """
-        logger.info(f"Forzando guardado completo del estado: {self.program_state}")
+        logger.info("Forzando guardado completo del estado")
         
         # Asegurar que todos los campos necesarios existan
         self._ensure_complete_state()
@@ -302,13 +298,9 @@ class ConfigManager:
     def repair_state_file(self) -> bool:
         """
         Repara el archivo de estado para asegurar que contiene todos los campos necesarios.
-        Lee el archivo directamente, lo repara y lo vuelve a escribir.
-        
-        Returns:
-            True si la reparación fue exitosa, False en caso contrario
         """
         try:
-            logger.info("Iniciando reparación del archivo de estado...")
+            logger.info("Iniciando reparación del archivo de estado")
             
             # Cargar el estado actual desde el archivo
             current_state = None
@@ -316,7 +308,6 @@ class ConfigManager:
                 try:
                     with open(self.status_file, 'r', encoding='utf-8') as f:
                         current_state = json.load(f)
-                    logger.info(f"Estado actual cargado: {current_state}")
                 except Exception as e:
                     logger.error(f"Error al leer archivo de estado: {e}")
                     current_state = None
@@ -330,7 +321,6 @@ class ConfigManager:
             default_state = self._default_program_state()
             for key, default_value in default_state.items():
                 if key not in current_state:
-                    logger.info(f"Reparando: Campo '{key}' faltante, añadiendo valor predeterminado: {default_value}")
                     current_state[key] = default_value
             
             # Guardar el estado reparado directamente en el archivo
@@ -340,7 +330,7 @@ class ConfigManager:
             # Actualizar el estado en memoria
             self.program_state = current_state
             
-            logger.info(f"Reparación completada. Estado actualizado: {current_state}")
+            logger.info("Reparación completada exitosamente")
             return True
         except Exception as e:
             logger.error(f"Error durante la reparación del archivo de estado: {e}", exc_info=True)

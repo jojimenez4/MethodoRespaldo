@@ -318,9 +318,7 @@ def run_as_service():
             if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
                 logger.removeHandler(handler)
                 
-        # Aumentar nivel de detalle del logging en modo servicio
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Configuración de logging en modo servicio completada")
+        logger.info("Configuración de logging en modo servicio completada")
     except Exception as e:
         # No podemos usar logger aquí si falló la configuración
         print(f"Error al configurar logs de servicio: {e}")
@@ -336,11 +334,11 @@ def run_as_service():
     
     try:
         # Inicializar administradores de configuración y respaldo
-        logger.debug("Inicializando ConfigManager para modo servicio")
+        logger.info("Inicializando ConfigManager para modo servicio")
         config_manager = ConfigManager()
         
         # Forzar reparación del archivo de estado antes de comenzar
-        logger.debug("Reparando archivo de estado")
+        logger.info("Reparando archivo de estado")
         config_manager.repair_state_file()
         
         # Registrar estado actual para diagnóstico
@@ -378,7 +376,7 @@ def run_as_service():
                         consecutive_errors = 0
                     
                     # Dormir para no consumir CPU
-                    time.sleep(10)  # Revisamos cada 10 segundos (más frecuente que 60)
+                    time.sleep(10)
                     
                     # Cada 5 minutos, verificar que todo esté bien
                     current_time = time.time()
@@ -386,9 +384,6 @@ def run_as_service():
                         last_error_time = current_time
                         
                         # Verificar y reparar estado
-                        logger.debug("Verificación periódica de estado")
-                        
-                        # Recargar estado
                         program_state = config_manager.get_program_state()
                         server_data = config_manager.get_server_data()
                         
@@ -422,15 +417,15 @@ def run_as_service():
                             success = start_scheduled_backups()
                             if success:
                                 logger.info("Configuración reparada y scheduler reiniciado")
-                                consecutive_errors = 0  # Resetear contador
+                                consecutive_errors = 0
                             else:
                                 logger.error("Error al reparar configuración")
                         except Exception as repair_error:
                             logger.critical(f"Error al intentar reparar: {repair_error}", exc_info=True)
-                    
-                    # Esperar antes del siguiente intento (tiempo creciente con el número de errores)
-                    backoff_time = min(60, 5 * consecutive_errors)  # Máximo 60 segundos
-                    time.sleep(backoff_time)
+                
+                # Esperar antes del siguiente intento
+                backoff_time = min(60, 5 * consecutive_errors)
+                time.sleep(backoff_time)
         else:
             logger.error("No se pudo iniciar el servicio de respaldo")
             return 1

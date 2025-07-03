@@ -18,7 +18,7 @@ from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
-# Configurar logging
+# Configurar logging - Solo para producción
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(
     level=logging.INFO,
@@ -27,10 +27,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Agregar manejador para consola
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-logger.addHandler(console_handler)
+# Remover manejador de consola en producción
+# console_handler = logging.StreamHandler()
+# console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+# logger.addHandler(console_handler)
 
 # Cargar variables de entorno
 dotenv.load_dotenv()
@@ -515,9 +515,6 @@ def backup_mysql_database(
 def find_mysql_bin_path() -> Optional[Path]:
     """
     Busca la ruta de instalación de MySQL de manera más exhaustiva.
-    
-    Returns:
-        Path a la carpeta bin de MySQL o None si no se encuentra
     """
     common_paths = [
         Path("C:/Program Files/MySQL/MySQL Server 8.0/bin"),
@@ -529,7 +526,7 @@ def find_mysql_bin_path() -> Optional[Path]:
     ]
     
     # Buscar versiones adicionales de MySQL
-    for i in range(0, 20):  # Buscar versiones desde 8.0 hasta 8.19
+    for i in range(0, 20):
         version = f"8.{i}"
         common_paths.append(Path(f"C:/Program Files/MySQL/MySQL Server {version}/bin"))
         common_paths.append(Path(f"C:/Program Files (x86)/MySQL/MySQL Server {version}/bin"))
@@ -580,15 +577,12 @@ def find_mysql_bin_path() -> Optional[Path]:
     except:
         pass
     
-    logger.warning("No se encontró la instalación de MySQL")
+    logger.error("No se encontró la instalación de MySQL")
     return None
 
 def find_7zip_path() -> Optional[Path]:
     """
     Busca la ruta de instalación de 7-Zip de manera más exhaustiva.
-    
-    Returns:
-        Path a la carpeta de 7-Zip o None si no se encuentra
     """
     common_paths = [
         Path("C:/Program Files/7-Zip"),
@@ -641,7 +635,7 @@ def find_7zip_path() -> Optional[Path]:
     except:
         pass
     
-    logger.warning("No se encontró la instalación de 7-Zip")
+    logger.error("No se encontró la instalación de 7-Zip")
     return None
 
 def send_email(client: str, message: str) -> bool:

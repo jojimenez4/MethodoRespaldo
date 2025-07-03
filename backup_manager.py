@@ -74,7 +74,6 @@ class BackupScheduler:
                         self._release_process_lock()
                     else:
                         logger.warning("Otro proceso está ejecutando un respaldo. Esperando...")                       
-                        # Esperar un tiempo antes de reintentar
                         time.sleep(5)
                         continue
                 
@@ -87,7 +86,7 @@ class BackupScheduler:
                 with open(self._lock_file_path, 'w') as f:
                     f.write(lock_info)
                 
-                logger.debug(f"Bloqueo de proceso adquirido: {lock_info}")
+                logger.info(f"Bloqueo de proceso adquirido")
                 return True
                 
             except Exception as e:
@@ -107,7 +106,7 @@ class BackupScheduler:
         try:
             if os.path.exists(self._lock_file_path):
                 os.remove(self._lock_file_path)
-                logger.debug("Bloqueo de proceso liberado")
+                logger.info("Bloqueo de proceso liberado")
             return True
         except Exception as e:
             logger.error(f"Error al liberar bloqueo de proceso: {e}")
