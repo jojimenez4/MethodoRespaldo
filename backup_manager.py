@@ -18,7 +18,8 @@ from typing import Dict, Any, Optional, Callable, List, Tuple
 
 from functions import (
     decrypt, send_email, manage_backup_limit, find_mysql_bin_path, 
-    find_7zip_path, KEY, DATABASE, USER, BACKUP_PASSWORD, logger
+    find_7zip_path, find_sqlcmd_path, backup_sqlserver_database,
+    KEY, DATABASE, USER, BACKUP_PASSWORD, logger
 )
 
 class BackupScheduler:
@@ -372,6 +373,102 @@ class BackupManager:
         """Inicializa el gestor de respaldos."""
         self.scheduler = BackupScheduler()
     
+    def backup_database(
+        self,
+        server_data: Dict[str, Any],
+        backup_dir: str,
+        client: str,
+        amount: int,
+        update_callback: Optional[Callable[[int, str], None]] = None
+    ) -> bool:
+        """
+        Realiza un respaldo de la base de datos según su tipo.
+        
+        Args:
+            server_data: Datos del servidor
+            backup_dir: Directorio donde se almacenará el backup
+            client: Nombre del cliente
+            amount: Cantidad máxima de backups a mantener
+            update_callback: Función de callback para actualizar el progreso
+            
+        Returns:
+            True si el backup fue exitoso, False en caso contrario
+        """
+        server_type = server_data.get("server_type")
+        
+        if server_type == "MySQL Server (TCP/IP)":
+            return self.backup_mysql_database(
+                server_data.get("password", ""),
+                backup_dir,
+                client,
+                amount,
+                server_data,
+                update_callback
+            )
+        elif server_type == "SQL Server (Windows Authentication)":
+            return self.backup_sqlserver_database(
+                server_data,
+                backup_dir,
+                client,
+                amount,
+                update_callback
+            )
+        else:
+            logger.error(f"Tipo de servidor no soportado: {server_type}")
+            return False
+    
+    def backup_sqlserver_database(
+        self,
+        server_data: Dict[str, Any],
+        backup_dir: str,
+        client: str,
+        amount: int,
+        update_callback: Optional[Callable[[int, str], None]] = None
+    ) -> bool:
+        """
+        Realiza un respaldo de la base de datos SQL Server.
+        
+        Args:
+            server_data: Datos del servidor SQL Server
+            backup_dir: Directorio donde se almacenará el backup
+            client: Nombre del cliente
+            amount: Cantidad máxima de backups a mantener
+            update_callback: Función de callback para actualizar el progreso
+            
+        Returns:
+            True si el backup fue exitoso, False en caso contrario
+        """
+        try:
+            server = server_data.get("host", "localhost")
+            username = server_data.get("user", "sa")
+            password = server_data.get("password", "")
+            database = server_data.get("database", "")
+            
+            if not password:
+                raise ValueError("Contraseña no configurada para SQL Server")
+            
+            if not database:
+                raise ValueError("Base de datos no especificada para SQL Server")
+            
+            # Usar la función de respaldo específica para SQL Server
+            return backup_sqlserver_database(
+                server=server,
+                username=username,
+                password=password,
+                database=database,
+                backup_dir=backup_dir,
+                client=client,
+                amount=amount,
+                server_data=server_data,
+                update_callback=update_callback
+            )
+            
+        except Exception as e:
+            error_message = f"Error en el proceso de respaldo SQL Server: {e}"
+            logger.error(error_message, exc_info=True)
+            send_email(client, f"Error ocurrido al respaldar datos SQL Server: {e}")
+            return False
+
     def backup_mysql_database(
         self,
         password: str, 
