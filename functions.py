@@ -12,10 +12,9 @@ import logging
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
-from Crypto.Hash import SHA256, HMAC
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
@@ -77,15 +76,17 @@ def encrypt(key: bytes, source: Union[str, bytes], encode: bool = True) -> Union
         
         # Generar nonce aleatorio
         nonce = get_random_bytes(16)
-        
+        if isinstance(nonce, str):
+            nonce = nonce.encode("utf-8")
         # Crear cifrador AES en modo GCM (más seguro que CBC)
         cipher = AES.new(key_hash, AES.MODE_GCM, nonce=nonce)
-        
+
         # Cifrar datos
+        cipher.update(b'')  # Necesario para el modo GCM
         ciphertext, tag = cipher.encrypt_and_digest(source)
         
         # Combinar nonce + tag + texto cifrado
-        encrypted_data = nonce + tag + ciphertext
+        encrypted_data = bytes(nonce) + bytes(tag) + bytes(ciphertext)
         
         return base64.b64encode(encrypted_data).decode("utf-8") if encode else encrypted_data
     except Exception as e:
@@ -114,9 +115,18 @@ def decrypt(key: bytes, source: Union[str, bytes], decode: bool = True) -> bytes
         
         # Extraer nonce, tag y texto cifrado
         nonce = source[:16]
+        if isinstance(nonce, str):
+            nonce = nonce.encode("utf-8")
         tag = source[16:32]
+        if isinstance(tag, str):
+            tag = tag.encode("utf-8")
+        else:
+            tag = bytes(tag)
         ciphertext = source[32:]
-        
+        if isinstance(ciphertext, str):
+            ciphertext = ciphertext.encode("utf-8")
+        else:
+            ciphertext = bytes(ciphertext)
         # Crear descifrador
         cipher = AES.new(key_hash, AES.MODE_GCM, nonce=nonce)
         
@@ -132,7 +142,7 @@ def decrypt(key: bytes, source: Union[str, bytes], decode: bool = True) -> bytes
         raise
 
 @contextmanager
-def mysql_connection(host: str, port: int, password: str) -> Generator[mysql.connector.connection.MySQLConnection, None, None]:
+def mysql_connection(host: str, port: int, password: str) -> Generator[Any, None, None]:
     """
     Administra la conexión a MySQL de forma segura usando context manager.
     
@@ -300,14 +310,14 @@ def backup_mysql_database(
         mysqldump_cmd = [
             str(mysql_bin_path / "mysqldump"),
             "-e", "-R",
-            "-u", USER,
+            "-u", USER or "",
             f"-p{decrypted_password}",
-            DATABASE,
-            f"--result-file={temp_backup_path}"
+            DATABASE or "",
+            f"--result-file={str(temp_backup_path)}"
         ]
         
         # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
-        safe_cmd = ' '.join(mysqldump_cmd).replace(decrypted_password, "********")
+        safe_cmd = ' '.join(mysqldump_cmd).replace(decrypted_password or "", "********")
         logger.info(f"Ejecutando: {safe_cmd}")
         
         startupinfo = None
@@ -386,11 +396,12 @@ def backup_mysql_database(
         ]
 
         # Ejecutar el comando de forma segura
-        safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD, "********")
+        safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD or "", "********")
         logger.info(f"Ejecutando: {safe_compress_cmd}")
 
         # Intentar comprimir con múltiples reintentos si es necesario
         max_compression_retries = 3
+        seven_zip_process = None  # Ensure variable is always defined
         for retry in range(max_compression_retries):
             try:
                 seven_zip_process = subprocess.run(
@@ -452,14 +463,6 @@ def backup_mysql_database(
         max_delete_retries = 5
         for retry in range(max_delete_retries):
             try:
-                # Asegurar que los procesos han terminado
-                if 'seven_zip_process' in locals() and seven_zip_process:
-                    try:
-                        if hasattr(seven_zip_process, 'kill'):
-                            seven_zip_process.kill()
-                    except:
-                        pass
-                        
                 # Esperar un momento antes de intentar eliminar
                 time.sleep(1)
                 
@@ -654,12 +657,12 @@ def send_email(client: str, message: str) -> bool:
     """
 
     # Información de configuración del correo
-    smtp_server = "webmail.methodo.cl"
+    smtp_server = "mail.methodo.cl"
     smtp_port = 25
     
     try:
         # Verificar que tengamos credenciales
-        if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        if not EMAIL_ADDRESS or not EMAIL_PASSWORD or not RECEIVER_EMAIL:
             logger.warning("Credenciales de correo no configuradas. No se enviará notificación.")
             return False
             
@@ -729,7 +732,7 @@ def manage_backup_limit(backup_dir: str, amount: int) -> bool:
         logger.error(f"Error al gestionar límite de respaldos: {e}")
         return False
 
-def save_state(filepath: str, state: Dict[str, Any]) -> bool:
+def save_state(filepath: Union[str, Path], state: Dict[str, Any]) -> bool:
     """
     Guarda el estado del programa en un archivo JSON de manera segura.
     
@@ -788,7 +791,7 @@ def load_state(filepath: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error al cargar el estado: {e}")
         return None
 
-def decrypt_backup_file(zip_path: str, password: str, output_dir: Optional[str] = None) -> Tuple[bool, str]:
+def decrypt_backup_file(zip_path: Union[str, Path], password: str, output_dir: Optional[str] = None) -> Tuple[bool, str]:
     """
     Desencripta un archivo de respaldo 7z
     
@@ -806,11 +809,11 @@ def decrypt_backup_file(zip_path: str, password: str, output_dir: Optional[str] 
             raise FileNotFoundError(f"El archivo {zip_path} no existe")
             
         if output_dir is None:
-            output_dir = zip_path.parent
+            output_dir = str(zip_path.parent)
         else:
-            output_dir = Path(output_dir)
-            if not output_dir.exists():
-                output_dir.mkdir(parents=True)
+            output_path = Path(output_dir)
+            if not output_path.exists():
+                output_path.mkdir(parents=True)
         
         seven_zip_path = find_7zip_path()
         if not seven_zip_path:
@@ -827,7 +830,7 @@ def decrypt_backup_file(zip_path: str, password: str, output_dir: Optional[str] 
         logger.info(f"Desencriptando archivo: {zip_path}")
         
         # No mostrar la contraseña en los logs
-        safe_cmd = ' '.join(extract_cmd).replace(password, "********")
+        safe_cmd = ' '.join(extract_cmd).replace(password or "", "********")
         
         process = subprocess.run(
             extract_cmd, 
@@ -860,9 +863,7 @@ def create_secure_temp_dir() -> Path:
         Path al directorio temporal
     """
     import tempfile
-    import os
     import uuid
-    from pathlib import Path
     
     # Crear un nombre único para el directorio
     unique_id = str(uuid.uuid4())[:8]
@@ -879,17 +880,18 @@ def create_secure_temp_dir() -> Path:
         if os.name == 'nt':
             try:
                 # Intentar importar módulos sin causar error si no están disponibles
-                win32security_imported = False
+                win32security = None
+                con = None
+                win32file = None
                 try:
                     import win32security
                     import ntsecuritycon as con
                     import win32file
-                    win32security_imported = True
                 except ImportError:
                     logger.debug("Módulos win32security no disponibles, continuando sin establecer permisos explícitos")
                 
-                # Solo intentar establecer permisos si se importaron los módulos
-                if win32security_imported:
+                # Solo intentar establecer permisos si se importaron todos los módulos
+                if win32security is not None and con is not None and win32file is not None:
                     # Obtener el SID del usuario actual
                     username = os.environ.get('USERNAME', 'SYSTEM')
                     domain = os.environ.get('USERDOMAIN', '')
@@ -937,7 +939,6 @@ def create_unique_temp_dir() -> Path:
     """
     import tempfile
     import uuid
-    from pathlib import Path
     
     # Crear un nombre único para el directorio
     unique_id = str(uuid.uuid4())
