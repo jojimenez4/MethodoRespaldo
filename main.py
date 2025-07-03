@@ -455,8 +455,11 @@ def run_backup_immediate():
             try:
                 # Verificar que el directorio de respaldo existe
                 backup_dir = program_state.get("backup_dir")
-                os.makedirs(backup_dir, exist_ok=True)
-                
+                if backup_dir:
+                    os.makedirs(backup_dir, exist_ok=True)
+                else:
+                    logger.error("No se encontró directorio de respaldo configurado")
+                    return 1
                 backup_manager = BackupManager()
                 backup_manager.backup_mysql_database(
                     server_data["password"],
