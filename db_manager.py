@@ -11,7 +11,7 @@ from typing import Tuple, Dict, Any, Optional, List, Generator
 from functions import decrypt, KEY, USER, logger
 
 @contextmanager
-def mysql_connection(host: str, port: int, password: str, user: str, database: str) -> Generator[mysql.connector.connection.MySQLConnection, None, None]:
+def mysql_connection(host: str, port: int, password: str, user: str, database: str) -> Generator[Any, None, None]:
     """
     Administra la conexión a MySQL de forma segura usando context manager.
     
@@ -190,7 +190,8 @@ class DatabaseManager:
             with connection.cursor() as cursor:
                 # Obtener versión
                 cursor.execute("SELECT VERSION()")
-                info["version"] = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                info["version"] = result[0] if result else "Desconocida"
                 
                 # Obtener tablas
                 cursor.execute("SHOW TABLES")
@@ -227,7 +228,8 @@ class DatabaseManager:
             
             # Obtener versión
             cursor.execute("SELECT @@VERSION")
-            info["version"] = cursor.fetchone()[0].split('\n')[0]
+            result = cursor.fetchone()
+            info["version"] = result[0].split('\n')[0] if result else "Desconocida"
             
             # Obtener tablas
             cursor.execute(f"SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'")
