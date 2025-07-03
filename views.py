@@ -59,7 +59,7 @@ class AppState:
             cls.backup_minutes = minutes
 
 # Funciones de utilidad
-def center_window(window: customtkinter.CTk, width: int, height: int) -> None:
+def center_window(window, width: int, height: int) -> None:
     """Centrar una ventana en la pantalla."""
     screen_width = window.winfo_screenwidth()
     screen_height = window.winfo_screenheight()
@@ -162,6 +162,13 @@ def create_login_interface():
                     host = server_data_state.get("host")
                     port = server_data_state.get("port")
                     password = server_data_state.get("password")
+                    
+                    # Verificar que los datos necesarios estén disponibles
+                    if not host or not port or not password:
+                        logger.error("Datos de conexión incompletos en el estado del servidor")
+                        messagebox.showerror("Error", "Datos de conexión incompletos.")
+                        create_server_interface()
+                        return
                     
                     # Verificar conexión
                     connection_result = bd_connect_mysql(host, port, password)
@@ -290,7 +297,7 @@ def create_server_interface() -> None:
             
             # Procesar según tipo de servidor
             if server_type_selected == "MySQL Server (TCP/IP)":
-                client, connection_success = bd_connect_mysql(host, port, encrypted_password)
+                client, connection_success = bd_connect_mysql(host, port, password)
                 
                 if connection_success:
                     # Guardar configuración de conexión
@@ -1456,9 +1463,10 @@ def create_system_tray_icon() -> None:
     """Crea un ícono en la bandeja del sistema."""
     def show_window(icon, item) -> None:
         """Muestra la ventana principal."""
-        AppState.root_window.deiconify()
-        AppState.root_window.lift()
-        AppState.root_window.focus_force()
+        if AppState.root_window:
+            AppState.root_window.deiconify()
+            AppState.root_window.lift()
+            AppState.root_window.focus_force()
     
     def exit_app(icon, item) -> None:
         """Cierra la aplicación desde la bandeja del sistema."""
