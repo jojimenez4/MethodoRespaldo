@@ -180,6 +180,29 @@ def create_login_interface():
                         logger.error(f"Error de conexión a BD: {connection_result[0]}")
                         messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
                         create_server_interface()
+                elif server_type == "SQL Server (Windows Authentication)":
+                    host = server_data_state.get("host")
+                    user = server_data_state.get("user")
+                    database = server_data_state.get("database")
+                    password = server_data_state.get("password")
+                    
+                    # Verificar que los datos necesarios estén disponibles
+                    if not host or not user or not database or not password:
+                        logger.error("Datos de conexión incompletos en el estado del servidor SQL Server")
+                        messagebox.showerror("Error", "Datos de conexión incompletos.")
+                        create_server_interface()
+                        return
+                    
+                    # Verificar conexión
+                    connection_result = bd_connect_sqlserver(host, user, password, database)
+                    connection_success = connection_result[1]
+                    
+                    if connection_success:
+                        open_backup_interface(server_data_state)
+                    else:
+                        logger.error(f"Error de conexión a SQL Server: {connection_result[0]}")
+                        messagebox.showerror("Error", "No se pudo conectar a la base de datos SQL Server.")
+                        create_server_interface()
                 else:
                     create_server_interface()
             else:
@@ -369,7 +392,7 @@ def create_server_interface() -> None:
                 if not database:
                     raise ValueError("El nombre de la base de datos no puede estar vacío")
                 
-                client, connection_success = bd_connect_sqlserver(host, username, password, database)
+                client, connection_success = bd_connect_sqlserver(host, username, encrypted_password, database)
                 
                 if connection_success:
                     # Guardar configuración de conexión
@@ -947,6 +970,120 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     
                     logger.error(f"Error al iniciar el respaldo: {e}", exc_info=True)
                     messagebox.showerror("Error", f"Error al iniciar el respaldo: {e}")
+            elif server_type == "SQL Server (Windows Authentication)":
+                try:
+                    # Actualizar el estado del programa de manera segura usando ConfigManager
+                    config_manager.update_program_state(
+                        running=True,
+                        status="in_progress",
+                        backup_dir=folder_path,
+                        progress=0
+                    )
+
+                    # Lanzar el respaldo en un hilo separado
+                    def run_backup() -> None:
+                        try:
+                            # Crear instancia de BackupManager
+                            backup_manager = BackupManager()
+                            
+                            # Ejecutar respaldo para SQL Server
+                            result = backup_manager.backup_sqlserver_database(
+                                server_data,
+                                folder_path,
+                                server_data.get("client", "Cliente"),
+                                AppState.selected_amount,
+                                update_callback=update_progress
+                            )
+                            
+                            # Actualizar al completar en el hilo principal
+                            progress_window.after(0, lambda: completion_tasks(result))
+                        except Exception as e:
+                            # Manejar errores en el hilo principal
+                            progress_window.after(0, lambda: handle_error(e))
+                    
+                    def completion_tasks(result=True) -> None:
+                        if not result:
+                            handle_error(Exception("El proceso de respaldo falló."))
+                            return
+                            
+                        update_progress(100, "Respaldo completado.")
+                        
+                        # Actualizar estado de manera segura
+                        config_manager.update_program_state(
+                            status="completed",
+                            client=server_data.get("client", "Cliente"),
+                            backup_dir=folder_path,
+                            amount=AppState.selected_amount,
+                            timestamp=datetime.datetime.now().isoformat(),
+                            progress=100
+                        )
+                        
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
+                        
+                        messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                        
+                        # Configurar programación si se solicitó
+                        if backup_hours or backup_minutes:
+                            # Programar respaldo con ConfigManager
+                            config_manager.set_backup_schedule(
+                                hours=backup_hours if backup_hours is not None else 4,
+                                minutes=backup_minutes if backup_minutes is not None else 0,
+                                enabled=True
+                            )
+                            
+                            # Forzar guardado completo para asegurar que todos los campos están presentes
+                            config_manager.force_save_all()
+                            
+                            ocultar_ventana()
+                            
+                            # Actualizar etiqueta de programación
+                            schedule_label.configure(
+                                text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
+                            )
+                            
+                            # Iniciar hilo de programación
+                            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+                                AppState.scheduled_backup_thread = threading.Thread(
+                                    target=run_scheduler, 
+                                    daemon=True
+                                )
+                                AppState.scheduled_backup_thread.start()
+                                
+                            messagebox.showinfo(
+                                "Info", 
+                                f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
+                            )
+                        else:
+                            messagebox.showinfo("Info", "Respaldo automático no programado.")
+                    
+                    def handle_error(e: Exception) -> None:
+                        config_manager.update_program_state(
+                            status="error",
+                            progress=0
+                        )
+                        
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
+                        
+                        logger.error(f"Error en el respaldo: {e}", exc_info=True)
+                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    
+                    # Iniciar el proceso de respaldo en un hilo separado
+                    backup_thread = threading.Thread(target=run_backup, daemon=True)
+                    backup_thread.start()
+                    
+                except Exception as e:
+                    config_manager.update_program_state(
+                        status="error",
+                        progress=0
+                    )
+                    
+                    if progress_window.winfo_exists():
+                        progress_window.destroy()
+                    
+                    logger.error(f"Error al iniciar el respaldo SQL Server: {e}", exc_info=True)
+                    messagebox.showerror("Error", f"Error al iniciar el respaldo SQL Server: {e}")
             else:
                 if progress_window.winfo_exists():
                     progress_window.destroy()

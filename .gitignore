@@ -26,3 +26,9 @@ README_ENCRYPTION.md
 test_connections.py
 test_encryption.py
 server.json.example
+debug_sqlserver.log
+test_real_sqlserver.log
+test_sqlserver_debug.log
+test_real_sqlserver.py
+test_sqlserver_backup.py
+check_config.py

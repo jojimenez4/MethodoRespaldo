@@ -9,6 +9,10 @@ import pyodbc
 import smtplib
 import json
 import logging
+import time
+import uuid
+import tempfile
+import shutil
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -18,13 +22,29 @@ from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
-# Configurar logging - Solo para producción
+# Configurar logging - Para diagnóstico temporal
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-    filename='app.log'
-)
+
+# Configuración temporal para diagnóstico - activar cuando hay problemas
+DEBUG_MODE = False  # Cambiar a True solo para diagnóstico
+
+if DEBUG_MODE:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format=LOG_FORMAT,
+        handlers=[
+            logging.FileHandler('app.log'),
+            logging.FileHandler('debug_sqlserver.log'),  # Log adicional para debug
+            logging.StreamHandler()  # También mostrar en consola
+        ]
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format=LOG_FORMAT,
+        filename='app.log'
+    )
+
 logger = logging.getLogger(__name__)
 
 # Remover manejador de consola en producción
@@ -459,21 +479,21 @@ def find_sqlcmd_path() -> Optional[Path]:
     for path in common_paths:
         if path.exists():
             logger.info(f"sqlcmd encontrado en: {path}")
-            return path.parent
+            return path
     
     # Buscar en PATH del sistema
     try:
         import shutil
         sqlcmd_path = shutil.which("sqlcmd")
         if sqlcmd_path:
-            path = Path(sqlcmd_path).parent
+            path = Path(sqlcmd_path)
             logger.info(f"sqlcmd encontrado en PATH: {path}")
             return path
         
         # Intentar con where en Windows
         result = subprocess.run(["where", "sqlcmd"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
-            path = Path(result.stdout.strip()).parent
+            path = Path(result.stdout.strip())
             logger.info(f"sqlcmd encontrado con 'where': {path}")
             return path
     except Exception as e:
@@ -501,8 +521,8 @@ def find_sqlcmd_path() -> Optional[Path]:
                                     try:
                                         install_dir, _ = winreg.QueryValueEx(subkey, "InstallDir")
                                         if install_dir:
-                                            bin_path = Path(install_dir) / "Tools" / "Binn"
-                                            if bin_path.exists() and (bin_path / "sqlcmd.exe").exists():
+                                            bin_path = Path(install_dir) / "Tools" / "Binn" / "sqlcmd.exe"
+                                            if bin_path.exists():
                                                 logger.info(f"sqlcmd encontrado en registro: {bin_path}")
                                                 return bin_path
                                     except:
@@ -829,10 +849,6 @@ def backup_sqlserver_database(
         True si el backup fue exitoso, False en caso contrario
     """
     try:
-        import time
-        import uuid
-        import tempfile
-        
         # Validar parámetros de entrada
         backup_path = Path(backup_dir)
         if not backup_path.is_dir():
@@ -852,6 +868,13 @@ def backup_sqlserver_database(
         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
         timestamp_email = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]} {timestamp[8:10]}:{timestamp[10:12]}"
         
+        # Log de parámetros de conexión (sin contraseña)
+        logger.info(f"Iniciando respaldo SQL Server:")
+        logger.info(f"  Servidor: {server}")
+        logger.info(f"  Usuario: {username}")
+        logger.info(f"  Base de datos: {database}")
+        logger.info(f"  Tipo de servidor: {server_data.get('server_type', 'No especificado')}")
+        
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         
         # Sanitizar nombres para el archivo
@@ -865,40 +888,121 @@ def backup_sqlserver_database(
         
         # Verificar que las rutas existan
         if not sqlcmd_bin_path:
-            raise FileNotFoundError("No se pudo encontrar la instalación de sqlcmd")
+            logger.error("No se pudo encontrar sqlcmd en el sistema")
+            raise FileNotFoundError("No se pudo encontrar la instalación de sqlcmd. Verifique que SQL Server Command Line Utilities estén instalados.")
         
         if not seven_zip_path:
-            raise FileNotFoundError("No se pudo encontrar la instalación de 7-Zip")
+            logger.error("No se pudo encontrar 7-Zip en el sistema")
+            raise FileNotFoundError("No se pudo encontrar la instalación de 7-Zip. Verifique que 7-Zip esté instalado.")
+        
+        logger.info(f"Usando sqlcmd: {sqlcmd_bin_path}")
+        logger.info(f"Usando 7-Zip: {seven_zip_path}")
         
         # Cambiar al directorio de sqlcmd y ejecutar el backup
         if update_callback:
             update_callback(10, "Iniciando respaldo...")
         
         # Crear directorio temporal único para este respaldo
+        # SQL Server necesita permisos de escritura, usar directorio público o específico
         unique_id = str(uuid.uuid4())[:8]
-        temp_dir = Path(tempfile.gettempdir()) / f"methodo_sqlserver_backup_{unique_id}"
-        temp_dir.mkdir(exist_ok=True)
+        
+        # Intentar diferentes ubicaciones para el archivo temporal
+        possible_temp_dirs = [
+            Path("C:/temp"),  # Directorio público común
+            Path("C:/Windows/temp"),  # Directorio de Windows
+            Path(tempfile.gettempdir()),  # Directorio temporal del usuario
+            backup_path  # Como último recurso, usar el directorio de destino
+        ]
+        
+        temp_dir = None
+        for temp_candidate in possible_temp_dirs:
+            try:
+                temp_test_dir = temp_candidate / f"methodo_sqlserver_backup_{unique_id}"
+                temp_test_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Probar escribir un archivo de prueba
+                test_file = temp_test_dir / "test_write.tmp"
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                test_file.unlink()
+                
+                temp_dir = temp_test_dir
+                logger.info(f"Directorio temporal seleccionado: {temp_dir}")
+                break
+                
+            except Exception as e:
+                logger.debug(f"No se puede usar {temp_candidate}: {e}")
+                continue
+        
+        if not temp_dir:
+            # Si ningún directorio temporal funciona, usar el directorio de destino directamente
+            temp_dir = backup_path / f"temp_backup_{unique_id}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            logger.warning(f"Usando directorio de destino para archivo temporal: {temp_dir}")
         
         # Usar un nombre único para el archivo temporal
         temp_backup_name = f"{client}_{device}_{database}_backup_{timestamp}_{unique_id}.bak"
         temp_backup_path = temp_dir / temp_backup_name
+        
+        # IMPORTANTE: En Windows, SQL Server necesita permisos específicos para escribir archivos
+        # Verificar que el directorio tenga permisos adecuados
+        try:
+            # Dar permisos completos al directorio para todos los usuarios (temporalmente)
+            import subprocess
+            import os
+            
+            # Solo en Windows, intentar dar permisos al directorio
+            if os.name == 'nt':
+                try:
+                    # Comando para dar permisos completos al directorio temporal
+                    perm_cmd = f'icacls "{temp_dir}" /grant Users:F /t'
+                    subprocess.run(perm_cmd, shell=True, capture_output=True, text=True, check=False)
+                    logger.info(f"Permisos configurados para: {temp_dir}")
+                except Exception as perm_error:
+                    logger.warning(f"No se pudieron configurar permisos: {perm_error}")
+                    
+        except Exception as e:
+            logger.warning(f"Error al configurar permisos: {e}")
         
         logger.info(f"Iniciando respaldo SQL Server en {temp_backup_path}")
         
         # Preparar comando SQL para el respaldo
         backup_sql = f"BACKUP DATABASE [{database}] TO DISK = N'{temp_backup_path}' WITH FORMAT, INIT, NAME = N'{database}-Full Database Backup', SKIP, NOREWIND, NOUNLOAD, STATS = 10"
         
-        # Comando sqlcmd
-        sqlcmd_cmd = [
-            str(sqlcmd_bin_path / "sqlcmd.exe"),
-            "-S", server,
-            "-U", username,
-            "-P", decrypted_password,
-            "-Q", backup_sql
-        ]
+        # Comando sqlcmd - Usar autenticación de Windows si el server_type lo indica
+        server_type = server_data.get("server_type", "")
+        logger.info(f"Configurando comando sqlcmd para: {server_type}")
+        
+        if "Windows Authentication" in server_type:
+            # Autenticación de Windows - usar -E
+            logger.info("Usando autenticación de Windows (-E)")
+            sqlcmd_cmd = [
+                str(sqlcmd_bin_path),
+                "-S", server,
+                "-E",  # Usar autenticación de Windows
+                "-Q", backup_sql
+            ]
+        else:
+            # Autenticación SQL Server - usar -U y -P
+            logger.info("Usando autenticación SQL Server (-U/-P)")
+            if not username:
+                raise ValueError("Se requiere un nombre de usuario para autenticación SQL Server")
+            if not decrypted_password:
+                raise ValueError("Se requiere una contraseña para autenticación SQL Server")
+            
+            sqlcmd_cmd = [
+                str(sqlcmd_bin_path),
+                "-S", server,
+                "-U", username,
+                "-P", decrypted_password,
+                "-Q", backup_sql
+            ]
         
         # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
-        safe_cmd = ' '.join(sqlcmd_cmd).replace(decrypted_password, "********")
+        if "Windows Authentication" in server_type:
+            safe_cmd = ' '.join(sqlcmd_cmd)
+        else:
+            safe_cmd = ' '.join(sqlcmd_cmd).replace(decrypted_password, "********")
         logger.info(f"Ejecutando: {safe_cmd}")
         
         startupinfo = None
@@ -917,10 +1021,52 @@ def backup_sqlserver_database(
             timeout=1800  # 30 minutos máximo
         )
         
+        # Log de salida del comando para diagnóstico
+        logger.debug(f"sqlcmd returncode: {process.returncode}")
+        logger.debug(f"sqlcmd stdout: {process.stdout}")
+        logger.debug(f"sqlcmd stderr: {process.stderr}")
+        
         if process.returncode != 0:
-            logger.error(f"Error en sqlcmd: {process.stderr}")
+            error_details = f"Error en sqlcmd: Código de salida {process.returncode}"
+            if process.stderr:
+                error_details += f"\nSTDERR: {process.stderr.strip()}"
+            if process.stdout:
+                error_details += f"\nSTDOUT: {process.stdout.strip()}"
+            logger.error(error_details)
+            
+            # Crear mensaje de error más específico para el usuario
+            user_error_msg = "Error al ejecutar respaldo SQL Server:\n"
+            if "login failed" in process.stderr.lower() or "login failed" in process.stdout.lower():
+                user_error_msg += "- Falló la autenticación. Verifique credenciales o permisos de Windows."
+            elif "network name cannot be found" in process.stderr.lower() or "network name cannot be found" in process.stdout.lower():
+                user_error_msg += "- No se puede conectar al servidor. Verifique que el servidor SQL Server esté ejecutándose."
+            elif "invalid object name" in process.stderr.lower() or "database" in process.stderr.lower():
+                user_error_msg += "- La base de datos especificada no existe o no tiene permisos."
+            else:
+                user_error_msg += f"- Detalles técnicos: {process.stderr or process.stdout}"
+            
             raise subprocess.CalledProcessError(process.returncode, safe_cmd,
-                                              output=process.stdout, stderr=process.stderr)
+                                              output=process.stdout, stderr=user_error_msg)
+        else:
+            # Comando exitoso, pero verificar si hay mensajes de error en stdout
+            stdout_content = process.stdout.strip().lower()
+            if any(error_phrase in stdout_content for error_phrase in [
+                'cannot open backup device', 'operating system error', 'acceso denegado',
+                'access is denied', 'backup database is terminating abnormally'
+            ]):
+                logger.error("sqlcmd reportó éxito, pero hay errores en la salida:")
+                logger.error(process.stdout)
+                
+                # Error específico de permisos
+                if 'operating system error 5' in stdout_content or 'acceso denegado' in stdout_content:
+                    error_msg = ("Error de permisos: SQL Server no puede escribir en el directorio especificado. "
+                               "Esto puede ocurrir cuando SQL Server se ejecuta con una cuenta de servicio "
+                               "que no tiene permisos en el directorio temporal.")
+                    raise PermissionError(error_msg)
+                else:
+                    raise RuntimeError(f"SQL Server reportó errores durante el respaldo: {process.stdout}")
+        
+        logger.info("Comando sqlcmd ejecutado exitosamente")
         
         # Esperar a que el proceso libere el archivo
         time.sleep(1)
