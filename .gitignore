@@ -32,3 +32,6 @@ test_sqlserver_debug.log
 test_real_sqlserver.py
 test_sqlserver_backup.py
 check_config.py
+uninstall_service.bat
+build_config.py
+db_config.json

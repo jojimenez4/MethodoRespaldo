@@ -22,35 +22,16 @@ from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
-# Configurar logging - Para diagnóstico temporal
+# Configurar logging
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
-# Configuración temporal para diagnóstico - activar cuando hay problemas
-DEBUG_MODE = False  # Cambiar a True solo para diagnóstico
-
-if DEBUG_MODE:
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format=LOG_FORMAT,
-        handlers=[
-            logging.FileHandler('app.log'),
-            logging.FileHandler('debug_sqlserver.log'),  # Log adicional para debug
-            logging.StreamHandler()  # También mostrar en consola
-        ]
-    )
-else:
-    logging.basicConfig(
-        level=logging.INFO,
-        format=LOG_FORMAT,
-        filename='app.log'
-    )
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    filename='app.log'
+)
 
 logger = logging.getLogger(__name__)
-
-# Remover manejador de consola en producción
-# console_handler = logging.StreamHandler()
-# console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-# logger.addHandler(console_handler)
 
 # Cargar variables de entorno
 dotenv.load_dotenv()
@@ -149,8 +130,6 @@ def decrypt(key: bytes, source: Union[str, bytes], decode: bool = True) -> bytes
         tag = source[16:32]
         ciphertext = source[32:]
         
-        logger.debug(f"Desencriptando: nonce={len(nonce)}, tag={len(tag)}, ciphertext={len(ciphertext)}")
-        
         # Crear descifrador
         cipher = AES.new(key_hash, AES.MODE_GCM, nonce=nonce)
         
@@ -180,10 +159,6 @@ def mysql_connection(host: str, port: int, password: str) -> Generator[Any, None
     """
     connection = None
     try:
-        # Probar encriptación primero
-        if not test_encryption_decryption(KEY):
-            raise ValueError("Las funciones de encriptación no están funcionando correctamente")
-            
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         connection = mysql.connector.connect(
             host=host,
@@ -250,10 +225,6 @@ def sqlserver_connection(server: str, username: str, password: str, database: st
     """
     connection = None
     try:
-        # Probar encriptación primero
-        if not test_encryption_decryption(KEY):
-            raise ValueError("Las funciones de encriptación no están funcionando correctamente")
-            
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         
         # Construcción de la cadena de conexión
@@ -662,11 +633,11 @@ def backup_mysql_database(
 
         # Verificar que el directorio destino tenga permisos de escritura
         try:
-            test_file = backup_path / "test_write.tmp"
-            with open(test_file, 'w') as f:
-                f.write("test")
-            if test_file.exists():
-                test_file.unlink()
+            check_file = backup_path / "check_write.tmp"
+            with open(check_file, 'w') as f:
+                f.write("check")
+            if check_file.exists():
+                check_file.unlink()
             logger.info(f"Permisos de escritura verificados en: {backup_path}")
         except Exception as e:
             logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
@@ -920,18 +891,17 @@ def backup_sqlserver_database(
                 temp_test_dir = temp_candidate / f"methodo_sqlserver_backup_{unique_id}"
                 temp_test_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Probar escribir un archivo de prueba
-                test_file = temp_test_dir / "test_write.tmp"
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                test_file.unlink()
+                # Probar escribir un archivo temporal
+                check_file = temp_test_dir / "check_write.tmp"
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                check_file.unlink()
                 
                 temp_dir = temp_test_dir
                 logger.info(f"Directorio temporal seleccionado: {temp_dir}")
                 break
                 
             except Exception as e:
-                logger.debug(f"No se puede usar {temp_candidate}: {e}")
                 continue
         
         if not temp_dir:
@@ -1022,9 +992,6 @@ def backup_sqlserver_database(
         )
         
         # Log de salida del comando para diagnóstico
-        logger.debug(f"sqlcmd returncode: {process.returncode}")
-        logger.debug(f"sqlcmd stdout: {process.stdout}")
-        logger.debug(f"sqlcmd stderr: {process.stderr}")
         
         if process.returncode != 0:
             error_details = f"Error en sqlcmd: Código de salida {process.returncode}"
@@ -1080,11 +1047,11 @@ def backup_sqlserver_database(
         
         # Verificar permisos de escritura en directorio destino
         try:
-            test_file = backup_path / "test_write.tmp"
-            with open(test_file, 'w') as f:
-                f.write("test")
-            if test_file.exists():
-                test_file.unlink()
+            check_file = backup_path / "check_write.tmp"
+            with open(check_file, 'w') as f:
+                f.write("check")
+            if check_file.exists():
+                check_file.unlink()
             logger.info(f"Permisos de escritura verificados en: {backup_path}")
         except Exception as e:
             logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
@@ -1444,7 +1411,6 @@ def validate_encrypted_data(source: Union[str, bytes]) -> bool:
             logger.error(f"Datos insuficientes: {len(decoded)} bytes (mínimo 33)")
             return False
             
-        logger.debug(f"Datos validados: {len(decoded)} bytes total")
         return True
     except Exception as e:
         logger.error(f"Error al validar datos encriptados: {e}")
@@ -1521,10 +1487,6 @@ def regenerate_encrypted_password(plain_password: str) -> str:
         if not plain_password:
             raise ValueError("Se requiere una contraseña válida")
             
-        # Verificar que la encriptación funciona
-        if not test_encryption_decryption(KEY):
-            raise ValueError("Las funciones de encriptación no están funcionando")
-            
         # Encriptar la contraseña (siempre como string base64)
         encrypted = encrypt(KEY, plain_password, encode=True)
         
@@ -1577,7 +1539,7 @@ def create_secure_temp_dir() -> Path:
                     import ntsecuritycon as con
                     import win32file
                 except ImportError:
-                    logger.debug("Módulos win32security no disponibles, continuando sin establecer permisos explícitos")
+                    pass
                 
                 # Solo intentar establecer permisos si se importaron todos los módulos
                 if win32security is not None and con is not None and win32file is not None:
@@ -1609,7 +1571,6 @@ def create_secure_temp_dir() -> Path:
                         security_descriptor
                     )
                     
-                    logger.debug(f"Permisos explícitos establecidos para el directorio temporal: {app_temp_dir}")
             except Exception as perm_error:
                 logger.warning(f"No se pudieron establecer permisos explícitos: {perm_error}")
         
@@ -1645,36 +1606,3 @@ def create_unique_temp_dir() -> Path:
         # En caso de error, usar el directorio temporal del sistema
         return Path(tempfile.gettempdir())
 
-def test_encryption_decryption(key: bytes, test_data: str = "test_password") -> bool:
-    """
-    Prueba las funciones de encriptación y desencriptación.
-    
-    Args:
-        key: Clave de encriptación
-        test_data: Datos de prueba
-        
-    Returns:
-        True si la prueba es exitosa, False en caso contrario
-    """
-    try:
-        logger.info("Iniciando prueba de encriptación/desencriptación...")
-        
-        # Encriptar datos de prueba
-        encrypted = encrypt(key, test_data)
-        logger.debug(f"Datos encriptados: {len(encrypted)} caracteres")
-        
-        # Desencriptar datos
-        decrypted = decrypt(key, encrypted)
-        decrypted_str = decrypted.decode("utf-8")
-        
-        # Verificar que los datos coinciden
-        if decrypted_str == test_data:
-            logger.info("Prueba de encriptación/desencriptación exitosa")
-            return True
-        else:
-            logger.error(f"Prueba fallida: '{test_data}' != '{decrypted_str}'")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error en prueba de encriptación/desencriptación: {e}")
-        return False

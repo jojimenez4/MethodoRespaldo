@@ -216,25 +216,6 @@ class BackupScheduler:
             # Marcar como programado
             self.scheduled = True
             
-            # Programar un primer respaldo para prueba (después de 1 minuto)
-            if hours > 1 or (hours == 1 and minutes > 10):
-                logger.info("Programando respaldo inicial de prueba en 1 minuto")
-                test_job = schedule.every(1).minutes.do(safe_backup_execution)
-                test_job.tag("test_backup")
-                
-                # Eliminar la tarea de prueba después de ejecutarse
-                def remove_test_task():
-                    try:
-                        for job in schedule.get_jobs("test_backup"):
-                            schedule.cancel_job(job)
-                        logger.info("Tarea de prueba eliminada")
-                    except Exception as e:
-                        logger.error(f"Error al eliminar tarea de prueba: {e}")
-                
-                # Programar eliminación de la tarea de prueba
-                cleanup_job = schedule.every(2).minutes.do(remove_test_task)
-                cleanup_job.tag("cleanup")
-            
             # Si no hay un hilo de scheduler en ejecución, iniciarlo
             if self.scheduler_thread is None or not self.scheduler_thread.is_alive():
                 self.start_scheduler_thread()
@@ -599,11 +580,11 @@ class BackupManager:
 
             # Verificar que el directorio destino tenga permisos de escritura
             try:
-                test_file = backup_path / "test_write.tmp"
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                if test_file.exists():
-                    test_file.unlink()
+                check_file = backup_path / "check_write.tmp"
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                if check_file.exists():
+                    check_file.unlink()
                 logger.info(f"Permisos de escritura verificados en: {backup_path}")
             except Exception as e:
                 logger.error(f"Sin permisos de escritura en {backup_path}: {e}")

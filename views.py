@@ -787,13 +787,13 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
                     return
             
-            # Verificar permisos escribiendo un archivo de prueba
-            test_file = os.path.join(folder_path, "test_write.tmp")
+            # Verificar permisos escribiendo un archivo temporal
+            check_file = os.path.join(folder_path, "check_write.tmp")
             try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                if os.path.exists(test_file):
-                    os.unlink(test_file)
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                if os.path.exists(check_file):
+                    os.unlink(check_file)
                 logger.info(f"Permisos de escritura verificados en: {folder_path}")
             except Exception as perm_error:
                 logger.error(f"Error de permisos de escritura: {perm_error}")
@@ -1219,11 +1219,11 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                         
                 # Verificar permisos
                 try:
-                    test_file = os.path.join(folder_path, "test_write.tmp")
-                    with open(test_file, 'w') as f:
-                        f.write("test")
-                    if os.path.exists(test_file):
-                        os.remove(test_file)
+                    check_file = os.path.join(folder_path, "check_write.tmp")
+                    with open(check_file, 'w') as f:
+                        f.write("check")
+                    if os.path.exists(check_file):
+                        os.remove(check_file)
                     logger.info("Permisos de escritura verificados en directorio de respaldo")
                 except Exception as perm_error:
                     logger.error(f"Error de permisos en directorio de respaldo: {perm_error}")

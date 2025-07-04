@@ -86,8 +86,8 @@ try:
         filemode='a'
     )
 except Exception as e:
-    # Si no podemos configurar logging, al menos mostrar error en consola
-    print(f"Error al configurar logging inicial: {e}")
+    # Si no podemos configurar logging, usar logger básico
+    logger.critical(f"Error al configurar logging inicial: {e}")
 
 # Ahora importamos el resto de módulos
 try:
@@ -97,17 +97,11 @@ try:
     from views import create_login_interface, create_system_tray_icon, AppState
 except Exception as e:
     logger.critical(f"Error al importar módulos: {e}", exc_info=True)
-    print(f"Error crítico al importar módulos: {e}")
     sys.exit(1)
 
 def parse_arguments():
     """Procesa los argumentos de línea de comandos."""
     parser = argparse.ArgumentParser(description="Sistema de respaldo de bases de datos")
-    parser.add_argument(
-        '--debug', 
-        action='store_true',
-        help='Activa el modo debug con más información en logs'
-    )
     parser.add_argument(
         '--backup-now', 
         action='store_true',
@@ -152,11 +146,11 @@ def start_scheduled_backups():
             logger.info(f"Directorio de respaldo verificado: {backup_dir}")
             
             # Verificar permisos intentando escribir un archivo temporal
-            test_file = os.path.join(backup_dir, "test_write.tmp")
+            check_file = os.path.join(backup_dir, "check_write.tmp")
             try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                os.remove(check_file)
                 logger.info(f"Permiso de escritura en directorio verificado")
             except Exception as write_error:
                 logger.error(f"Error de permisos de escritura en {backup_dir}: {write_error}")
@@ -214,11 +208,11 @@ def start_scheduled_backups():
                     # Verificar que el directorio existe y se puede escribir
                     try:
                         os.makedirs(backup_directory, exist_ok=True)
-                        test_file = os.path.join(backup_directory, "test_write.tmp")
-                        with open(test_file, 'w') as f:
-                            f.write("test")
-                        if os.path.exists(test_file):
-                            os.remove(test_file)
+                        check_file = os.path.join(backup_directory, "check_write.tmp")
+                        with open(check_file, 'w') as f:
+                            f.write("check")
+                        if os.path.exists(check_file):
+                            os.remove(check_file)
                         logger.info(f"Directorio de respaldo verificado con permisos: {backup_directory}")
                     except Exception as dir_error:
                         logger.error(f"Error de permisos en directorio de respaldo: {dir_error}")
@@ -321,7 +315,7 @@ def run_as_service():
         logger.info("Configuración de logging en modo servicio completada")
     except Exception as e:
         # No podemos usar logger aquí si falló la configuración
-        print(f"Error al configurar logs de servicio: {e}")
+        pass
     
     # Verificar y eliminar archivos de bloqueo obsoletos al inicio
     try:
@@ -487,11 +481,6 @@ def initialize_app():
         # Procesar argumentos
         args = parse_arguments()
         
-        # Configurar nivel de log según argumentos
-        if args.debug:
-            logger.setLevel(logging.DEBUG)
-            logger.debug("Modo debug activado")
-        
         # Si se solicita ejecución como servicio
         if args.service or is_service_mode():
             return run_as_service()
@@ -508,7 +497,7 @@ def initialize_app():
         try:
             logger.critical(f"Error fatal al iniciar la aplicación: {e}", exc_info=True)
         except:
-            print(f"Error crítico: {e}")
+            pass
         return 1
 
 if __name__ == "__main__":
@@ -519,5 +508,5 @@ if __name__ == "__main__":
         try:
             logger.critical(f"Error no capturado: {e}", exc_info=True)
         except:
-            print(f"Error crítico no manejado: {e}")
+            pass
         sys.exit(1)

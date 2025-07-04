@@ -104,9 +104,9 @@ class DatabaseManager:
         self.user = server_data.get("user", "sa")
         self.database = server_data.get("database", "")
     
-    def test_connection(self) -> Tuple[str, bool]:
+    def check_connection(self) -> Tuple[str, bool]:
         """
-        Prueba la conexión a la base de datos.
+        Verifica la conexión a la base de datos.
         
         Returns:
             Tuple con (mensaje, estado_conexión)
@@ -114,15 +114,15 @@ class DatabaseManager:
         server_type = self.server_data.get("server_type")
         
         if server_type == "MySQL Server (TCP/IP)":
-            return self._test_mysql_connection()
+            return self._check_mysql_connection()
         elif server_type == "SQL Server (Windows Authentication)":
-            return self._test_sqlserver_connection()
+            return self._check_sqlserver_connection()
         else:
             return "Tipo de servidor no soportado", False
     
-    def _test_mysql_connection(self) -> Tuple[str, bool]:
+    def _check_mysql_connection(self) -> Tuple[str, bool]:
         """
-        Prueba la conexión a MySQL y obtiene información del cliente.
+        Verifica la conexión a MySQL y obtiene información del cliente.
         
         Returns:
             Tuple con (nombre_cliente, éxito_conexión)
@@ -150,9 +150,9 @@ class DatabaseManager:
             logger.error(error_msg)
             return error_msg, False
     
-    def _test_sqlserver_connection(self) -> Tuple[str, bool]:
+    def _check_sqlserver_connection(self) -> Tuple[str, bool]:
         """
-        Prueba la conexión a SQL Server y obtiene información del cliente.
+        Verifica la conexión a SQL Server y obtiene información del cliente.
         
         Returns:
             Tuple con (nombre_cliente, éxito_conexión)
