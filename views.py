@@ -359,7 +359,7 @@ def create_server_interface() -> None:
             
             # Procesar según tipo de servidor
             if server_type_selected == "MySQL Server (TCP/IP)":
-                client, connection_success = bd_connect_mysql(host, port, password)
+                client, connection_success = bd_connect_mysql(host, port, encrypted_password)
                 
                 if connection_success:
                     # Guardar configuración de conexión
