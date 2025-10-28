@@ -172,6 +172,18 @@ def start_scheduled_backups():
         if not server_data:
             logger.error("No hay datos de servidor configurados")
             return False
+        
+        # Validar tipo de servidor
+        server_type = server_data.get("server_type")
+        if not server_type:
+            logger.error("Tipo de servidor no especificado en la configuración")
+            return False
+        
+        logger.info(f"Servicio configurado para tipo de servidor: {server_type}")
+        
+        if server_type not in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
+            logger.error(f"Tipo de servidor no soportado: {server_type}")
+            return False
             
         if not server_data.get("password"):
             logger.error("Contraseña de servidor no configurada")
@@ -219,7 +231,8 @@ def start_scheduled_backups():
                         return False
                     
                     # Registrar inicio de respaldo
-                    logger.info(f"Iniciando respaldo programado para {client_name} en {backup_directory}")
+                    server_type = server_data_copy.get("server_type", "Desconocido")
+                    logger.info(f"Iniciando respaldo programado para {client_name} ({server_type}) en {backup_directory}")
                     
                     # Actualizar estado antes de ejecutar
                     config_manager.update_program_state(
@@ -228,13 +241,12 @@ def start_scheduled_backups():
                         timestamp=datetime.datetime.now().isoformat()
                     )
                     
-                    # Ejecutar respaldo
-                    result = backup_manager.backup_mysql_database(
-                        password,
+                    # Ejecutar respaldo usando método genérico que detecta el tipo de servidor
+                    result = backup_manager.backup_database(
+                        server_data_copy,
                         backup_directory,
                         client_name,
-                        amount_value,
-                        server_data_copy
+                        amount_value
                     )
                     
                     # Actualizar estado al finalizar
@@ -449,16 +461,25 @@ def run_backup_immediate():
                 else:
                     logger.error("No se encontró directorio de respaldo configurado")
                     return 1
+                
+                # Log del tipo de servidor para diagnóstico
+                server_type = server_data.get("server_type", "No especificado")
+                logger.info(f"Ejecutando respaldo inmediato para tipo de servidor: {server_type}")
+                
                 backup_manager = BackupManager()
-                backup_manager.backup_mysql_database(
-                    server_data["password"],
+                result = backup_manager.backup_database(
+                    server_data,
                     program_state["backup_dir"],
                     server_data.get("client", "Cliente"),
-                    program_state.get("amount", 5),
-                    server_data
+                    program_state.get("amount", 5)
                 )
-                logger.info("Respaldo inmediato completado")
-                return 0
+                
+                if result:
+                    logger.info("Respaldo inmediato completado exitosamente")
+                    return 0
+                else:
+                    logger.error("El respaldo inmediato falló")
+                    return 1
             except Exception as e:
                 logger.error(f"Error en respaldo inmediato: {e}", exc_info=True)
                 return 1

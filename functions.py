@@ -1,5 +1,4 @@
 import os
-import dotenv
 import socket
 import subprocess
 import datetime
@@ -22,6 +21,9 @@ from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
+# Importar gestor de variables de entorno seguro
+from env_manager import EnvManager, load_dotenv
+
 # Configurar logging
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
@@ -33,19 +35,19 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Cargar variables de entorno
-dotenv.load_dotenv()
+# Cargar variables de entorno (usa env_manager en lugar de dotenv)
+load_dotenv()
 
-# Constantes de configuración
-KEY = os.getenv("KEY", "").encode("utf-8")
-USER = os.getenv("USER")
-DATABASE = os.getenv("DATABASE")
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
-RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
-BACKUP_PASSWORD = os.getenv("BACKUP_PASSWORD")
-STATUS_PROGRAM = os.getenv("STATUS_PROGRAM", "status.json")
-SERVER_DATA = os.getenv("SERVER_DATA", "server.json")
+# Constantes de configuración (ahora usa EnvManager)
+KEY = EnvManager.get("KEY", "").encode("utf-8")
+USER = EnvManager.get("USER")
+DATABASE = EnvManager.get("DATABASE")
+EMAIL_ADDRESS = EnvManager.get("EMAIL_ADDRESS")
+EMAIL_PASSWORD = EnvManager.get("EMAIL_PASSWORD")
+RECEIVER_EMAIL = EnvManager.get("RECEIVER_EMAIL")
+BACKUP_PASSWORD = EnvManager.get("BACKUP_PASSWORD")
+STATUS_PROGRAM = EnvManager.get("STATUS_PROGRAM", "status.json")
+SERVER_DATA = EnvManager.get("SERVER_DATA", "server.json")
 
 # Verificar variables críticas
 if not KEY:
@@ -54,6 +56,12 @@ if not KEY:
     
 if not BACKUP_PASSWORD:
     logger.warning("BACKUP_PASSWORD no configurada. Los respaldos podrían no ser seguros.")
+
+# Log si está usando variables embebidas (compilado) o .env (desarrollo)
+if EnvManager.is_embedded():
+    logger.info("Usando variables de entorno embebidas (modo compilado)")
+else:
+    logger.info("Usando archivo .env (modo desarrollo)")
 
 # Mejorar encriptación con autenticación
 def encrypt(key: bytes, source: Union[str, bytes], encode: bool = True) -> Union[str, bytes]:
@@ -1087,7 +1095,7 @@ def backup_sqlserver_database(
                     text=True,
                     check=False,
                     startupinfo=startupinfo,
-                    timeout=300
+                    timeout=1200
                 )
                 
                 if seven_zip_process.returncode == 0:
@@ -1266,64 +1274,179 @@ def manage_backup_limit(backup_dir: str, amount: int) -> bool:
         logger.error(f"Error al gestionar límite de respaldos: {e}")
         return False
 
-def save_state(filepath: Union[str, Path], state: Dict[str, Any]) -> bool:
+def save_state(filepath: Union[str, Path], state: Dict[str, Any], max_retries: int = 3) -> bool:
     """
-    Guarda el estado del programa en un archivo JSON de manera segura.
+    Guarda el estado del programa en un archivo JSON de manera segura con retry logic.
     
     Args:
         filepath: Ruta del archivo de estado
         state: Diccionario con el estado a guardar
+        max_retries: Número máximo de reintentos
         
     Returns:
         True si la operación fue exitosa, False en caso contrario
     """
-    try:
-        # Crear un archivo temporal primero
-        filepath = Path(filepath)
-        temp_filepath = filepath.with_suffix(filepath.suffix + ".tmp")
-        
-        with open(temp_filepath, 'w', encoding='utf-8') as f:
-            json.dump(state, f, ensure_ascii=False, indent=4)
-        
-        # Reemplazar el archivo original solo si la escritura temporal fue exitosa
-        if filepath.exists():
-            filepath.unlink()  # Eliminar el original primero para evitar problemas en Windows
-        
-        temp_filepath.rename(filepath)
-        return True
-    except Exception as e:
-        logger.error(f"Error al guardar el estado: {e}")
-        return False
+    filepath_obj = Path(filepath)
+    
+    for attempt in range(max_retries):
+        try:
+            # Asegurar que el directorio existe
+            filepath_obj.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Validar que el estado es JSON serializable
+            try:
+                json_str = json.dumps(state, ensure_ascii=False, indent=4)
+            except (TypeError, ValueError) as e:
+                logger.error(f"Estado no es JSON serializable: {e}")
+                return False
+            
+            # Crear un archivo temporal con PID para evitar conflictos
+            temp_filepath = filepath_obj.with_suffix(f".tmp{os.getpid()}")
+            
+            # Escribir en el archivo temporal
+            with open(temp_filepath, 'w', encoding='utf-8') as f:
+                f.write(json_str)
+                f.flush()
+                os.fsync(f.fileno())  # Forzar escritura al disco
+            
+            # Verificar que se escribió correctamente
+            try:
+                with open(temp_filepath, 'r', encoding='utf-8') as f:
+                    verify_data = json.load(f)
+                    if verify_data != state:
+                        raise ValueError("Verificación falló: datos escritos no coinciden")
+            except Exception as e:
+                logger.error(f"Error al verificar archivo temporal: {e}")
+                if temp_filepath.exists():
+                    temp_filepath.unlink()
+                continue
+            
+            # Crear backup del archivo actual si existe
+            if filepath_obj.exists():
+                backup_path = filepath_obj.with_suffix(f".bak")
+                try:
+                    shutil.copy2(filepath_obj, backup_path)
+                except Exception as e:
+                    logger.warning(f"No se pudo crear backup: {e}")
+            
+            # Reemplazar el archivo original
+            if os.name == 'nt':
+                # En Windows, necesitamos eliminar primero
+                if filepath_obj.exists():
+                    filepath_obj.unlink()
+                temp_filepath.rename(filepath_obj)
+            else:
+                # En Unix, rename es atómico
+                temp_filepath.rename(filepath_obj)
+            
+            logger.debug(f"Estado guardado exitosamente en {filepath}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error al guardar estado (intento {attempt + 1}/{max_retries}): {e}", exc_info=True)
+            
+            # Limpiar archivo temporal si existe
+            temp_filepath = filepath_obj.with_suffix(f".tmp{os.getpid()}")
+            if temp_filepath.exists():
+                try:
+                    temp_filepath.unlink()
+                except:
+                    pass
+            
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (attempt + 1))  # Backoff exponencial
+                continue
+            else:
+                return False
+    
+    return False
 
-def load_state(filepath: str) -> Optional[Dict[str, Any]]:
+def load_state(filepath: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
     """
     Carga el estado del programa desde un archivo JSON con manejo de errores mejorado.
     
     Args:
         filepath: Ruta del archivo de estado
+        max_retries: Número máximo de reintentos
         
     Returns:
         Diccionario con el estado o None si hay error
     """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            state = json.load(f)
-        return state
-    except FileNotFoundError:
-        logger.warning(f"Archivo de estado {filepath} no encontrado, se creará uno nuevo")
-        return None
-    except json.JSONDecodeError:
-        logger.error(f"El archivo de estado {filepath} está corrupto, se creará uno nuevo")
-        # Hacer backup del archivo corrupto
-        filepath_obj = Path(filepath)
-        if filepath_obj.exists():
-            backup_path = filepath_obj.with_suffix(filepath_obj.suffix + ".corrupto")
-            filepath_obj.rename(backup_path)
-            logger.info(f"Se ha guardado una copia del archivo corrupto en {backup_path}")
-        return None
-    except Exception as e:
-        logger.error(f"Error al cargar el estado: {e}")
-        return None
+    filepath_obj = Path(filepath)
+    
+    for attempt in range(max_retries):
+        try:
+            if not filepath_obj.exists():
+                logger.warning(f"Archivo de estado {filepath} no encontrado")
+                return None
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+                # Validar que no está vacío
+                if not content.strip():
+                    logger.warning(f"Archivo {filepath} está vacío")
+                    return None
+                
+                try:
+                    state = json.loads(content)
+                    
+                    # Validar que es un diccionario
+                    if not isinstance(state, dict):
+                        logger.error(f"Archivo {filepath} no contiene un objeto JSON válido")
+                        # Intentar recuperar desde backup
+                        backup_path = filepath_obj.with_suffix(f".bak")
+                        if backup_path.exists():
+                            logger.info(f"Intentando recuperar desde backup")
+                            try:
+                                with open(backup_path, 'r', encoding='utf-8') as bf:
+                                    backup_state = json.loads(bf.read())
+                                    if isinstance(backup_state, dict):
+                                        logger.info("Recuperación desde backup exitosa")
+                                        shutil.copy2(backup_path, filepath)
+                                        return backup_state
+                            except Exception as be:
+                                logger.error(f"Error al recuperar desde backup: {be}")
+                        return None
+                    
+                    return state
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"El archivo de estado {filepath} está corrupto: {e}")
+                    
+                    # Intentar recuperar desde backup
+                    backup_path = filepath_obj.with_suffix(f".bak")
+                    if backup_path.exists():
+                        logger.info(f"Intentando recuperar desde backup: {backup_path}")
+                        try:
+                            with open(backup_path, 'r', encoding='utf-8') as bf:
+                                backup_state = json.loads(bf.read())
+                                if isinstance(backup_state, dict):
+                                    logger.info("Recuperación desde backup exitosa")
+                                    shutil.copy2(backup_path, filepath)
+                                    return backup_state
+                        except Exception as be:
+                            logger.error(f"Error al recuperar desde backup: {be}")
+                    
+                    # Hacer backup del archivo corrupto
+                    corrupted_path = filepath_obj.with_suffix(f".corrupto.{int(time.time())}")
+                    try:
+                        shutil.copy2(filepath, corrupted_path)
+                        logger.info(f"Copia del archivo corrupto guardada en {corrupted_path}")
+                    except Exception as ce:
+                        logger.error(f"No se pudo guardar copia del archivo corrupto: {ce}")
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error al cargar estado (intento {attempt + 1}/{max_retries}): {e}", exc_info=True)
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (attempt + 1))  # Backoff exponencial
+                continue
+            else:
+                return None
+    
+    return None
 
 def decrypt_backup_file(zip_path: Union[str, Path], password: str, output_dir: Optional[str] = None) -> Tuple[bool, str]:
     """
