@@ -8,6 +8,13 @@ import schedule
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# Importar psutil AQUÍ para que PyInstaller lo detecte
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 # Determinar si la aplicación está empaquetada con PyInstaller
 def is_bundled():
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
@@ -41,6 +48,9 @@ def setup_logging():
     # Asegurar que el directorio de logs existe
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
     
+    # Limpiar handlers existentes para evitar duplicación
+    logger.handlers.clear()
+    
     # Configurar manejadores de logs
     file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -51,6 +61,9 @@ def setup_logging():
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logger.addHandler(console_handler)
+    
+    # Evitar propagación al root logger
+    logger.propagate = False
     
     logger.info(f"Iniciando aplicación MethodoRespaldo desde: {APP_DIR}")
     if is_bundled():
@@ -76,18 +89,8 @@ def ensure_app_directories():
         except Exception as e:
             logger.error(f"Error al crear directorio {directory}: {e}")
 
-# Configuración inicial de logging básico para capturar errores tempranos
-try:
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format=LOG_FORMAT,
-        filename=LOG_FILE,
-        filemode='a'
-    )
-except Exception as e:
-    # Si no podemos configurar logging, usar logger básico
-    logger.critical(f"Error al configurar logging inicial: {e}")
+# NO configurar logging.basicConfig aquí - se hace en setup_logging()
+# Esto evita duplicación de logs
 
 # Ahora importamos el resto de módulos
 try:
@@ -110,7 +113,12 @@ def parse_arguments():
     parser.add_argument(
         '--service', 
         action='store_true',
-        help='Ejecuta la aplicación como servicio Windows'
+        help='Ejecuta la aplicación como servicio Windows (modo legacy/NSSM)'
+    )
+    parser.add_argument(
+        '--native-service',
+        action='store_true',
+        help='Ejecuta como servicio nativo de Windows (v2.0 con pywin32)'
     )
     return parser.parse_args()
 
@@ -313,18 +321,25 @@ def run_as_service():
     """Ejecuta la aplicación en modo servicio."""
     logger.info("Iniciando aplicación en modo servicio")
     
-    # Configurar logger específico para modo servicio
+    # Configurar logger específico para modo servicio (solo si no está configurado ya)
     try:
-        service_handler = logging.FileHandler(SERVICE_LOG_FILE, encoding='utf-8')
-        service_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-        logger.addHandler(service_handler)
+        # Verificar si ya existe un FileHandler para SERVICE_LOG_FILE
+        has_service_handler = any(
+            isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(SERVICE_LOG_FILE)
+            for h in logger.handlers
+        )
         
-        # Remover manejador de consola en modo servicio
-        for handler in list(logger.handlers):
-            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-                logger.removeHandler(handler)
-                
-        logger.info("Configuración de logging en modo servicio completada")
+        if not has_service_handler:
+            service_handler = logging.FileHandler(SERVICE_LOG_FILE, encoding='utf-8')
+            service_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+            logger.addHandler(service_handler)
+            
+            # Remover manejador de consola en modo servicio
+            for handler in list(logger.handlers):
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    logger.removeHandler(handler)
+                    
+            logger.info("Configuración de logging en modo servicio completada")
     except Exception as e:
         # No podemos usar logger aquí si falló la configuración
         pass
@@ -499,11 +514,70 @@ def initialize_app():
         # Asegurar que los directorios necesarios existan
         ensure_app_directories()
         
-        # Procesar argumentos
+        # Detectar si está siendo llamado por el Service Control Manager (SCM)
+        # El SCM ejecuta servicios desde services.exe
+        def is_running_as_service():
+            """Detecta si el proceso está siendo ejecutado como servicio de Windows"""
+            if not PSUTIL_AVAILABLE or 'psutil' not in sys.modules:
+                return False
+                
+            try:
+                import psutil as ps  # Import local para evitar unbound
+                parent = ps.Process().parent()
+                parent_name = parent.name().lower() if parent else "NONE"
+                if parent and parent_name == 'services.exe':
+                    logger.info("Servicio iniciado por Windows SCM")
+                    return True
+            except Exception as e:
+                logger.debug(f"Error detectando proceso padre: {e}")
+            return False
+        
+        # Si se detecta --native-service O si está siendo ejecutado por services.exe
+        is_service_call = '--native-service' in sys.argv or (len(sys.argv) == 1 and is_running_as_service())
+        
+        if is_service_call:
+            try:
+                from windows_service import MethodoRespaldoService, is_pywin32_available
+                
+                if not is_pywin32_available():
+                    logger.error("pywin32 no disponible - usando modo servicio legacy")
+                    return run_as_service()
+                
+                # Remover --native-service de sys.argv si está presente
+                if '--native-service' in sys.argv:
+                    sys.argv.remove('--native-service')
+                
+                # Iniciar servicio nativo
+                import win32serviceutil
+                import servicemanager
+                
+                # Si solo queda el ejecutable en sys.argv, el SCM está iniciando el servicio
+                if len(sys.argv) == 1:
+                    logger.info("Iniciando servicio Windows nativo v2.0")
+                    servicemanager.Initialize()
+                    servicemanager.PrepareToHostSingle(MethodoRespaldoService)
+                    servicemanager.StartServiceCtrlDispatcher()
+                    return 0
+                else:
+                    # Si hay argumentos (install, remove, debug, etc), usar HandleCommandLine
+                    logger.info(f"Ejecutando comando: {' '.join(sys.argv[1:])}")
+                    win32serviceutil.HandleCommandLine(MethodoRespaldoService)
+                    return 0
+                
+            except ImportError as e:
+                logger.error(f"Error importando windows_service: {e}")
+                logger.info("Cambiando a modo servicio legacy...")
+                return run_as_service()
+            except Exception as e:
+                logger.error(f"Error en servicio nativo: {e}", exc_info=True)
+                return 1
+        
+        # Procesar argumentos normales
         args = parse_arguments()
         
-        # Si se solicita ejecución como servicio
+        # Si se solicita ejecución como servicio (modo legacy/NSSM para compatibilidad v1.0)
         if args.service or is_service_mode():
+            logger.info("Iniciando en modo servicio legacy (compatibilidad v1.0)")
             return run_as_service()
         
         # Si se solicita respaldo inmediato

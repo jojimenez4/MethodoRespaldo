@@ -21,18 +21,13 @@ from Crypto.Hash import SHA256
 from contextlib import contextmanager
 from typing import Tuple, Dict, Any, Optional, Union, Callable, Generator
 
+# Asegurar que subprocess esté disponible para el linter
+assert subprocess is not None
+
 # Importar gestor de variables de entorno seguro
 from env_manager import EnvManager, load_dotenv
 
-# Configurar logging
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-    filename='app.log'
-)
-
+# Configurar logging - Solo obtener el logger, NO configurar aquí
 logger = logging.getLogger(__name__)
 
 # Cargar variables de entorno (usa env_manager en lugar de dotenv)
@@ -59,9 +54,9 @@ if not BACKUP_PASSWORD:
 
 # Log si está usando variables embebidas (compilado) o .env (desarrollo)
 if EnvManager.is_embedded():
-    logger.info("Usando variables de entorno embebidas (modo compilado)")
+    logger.debug("Usando variables de entorno embebidas (modo compilado)")
 else:
-    logger.info("Usando archivo .env (modo desarrollo)")
+    logger.debug("Usando archivo .env (modo desarrollo)")
 
 # Mejorar encriptación con autenticación
 def encrypt(key: bytes, source: Union[str, bytes], encode: bool = True) -> Union[str, bytes]:
@@ -276,7 +271,8 @@ def bd_connect_sqlserver(server: str, username: str, password: str, database: st
             
             # Intentar obtener información del cliente desde varias tablas posibles
             client_queries = [
-                "SELECT nombre_cliente FROM conf_sistema",
+                "SELECT nombre FROM conf_sistema",
+                "SELECT nombre_comision from centralizado.comision"
             ]
             
             client_name = None
@@ -328,7 +324,6 @@ def find_mysql_bin_path() -> Optional[Path]:
     # Buscar en rutas comunes
     for path in common_paths:
         if path.exists() and (path / "mysqldump.exe").exists():
-            logger.info(f"MySQL encontrado en: {path}")
             return path
     
     # Buscar en PATH del sistema
@@ -337,17 +332,15 @@ def find_mysql_bin_path() -> Optional[Path]:
         mysqldump_path = shutil.which("mysqldump")
         if mysqldump_path:
             path = Path(mysqldump_path).parent
-            logger.info(f"MySQL encontrado en PATH: {path}")
             return path
         
         # Intentar con where en Windows
         result = subprocess.run(["where", "mysqldump"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             path = Path(result.stdout.strip()).parent
-            logger.info(f"MySQL encontrado con 'where': {path}")
             return path
     except Exception as e:
-        logger.warning(f"Error al buscar MySQL en PATH: {e}")
+        logger.debug(f"Error al buscar MySQL en PATH: {e}")
     
     # Buscar en el registro de Windows
     try:
@@ -364,7 +357,6 @@ def find_mysql_bin_path() -> Optional[Path]:
                         if install_dir:
                             bin_path = Path(install_dir) / "bin"
                             if bin_path.exists() and (bin_path / "mysqldump.exe").exists():
-                                logger.info(f"MySQL encontrado en registro: {bin_path}")
                                 return bin_path
                 except:
                     continue
@@ -387,7 +379,6 @@ def find_7zip_path() -> Optional[Path]:
     # Buscar en rutas comunes
     for path in common_paths:
         if path.exists() and (path / "7z.exe").exists():
-            logger.info(f"7-Zip encontrado en: {path}")
             return path
     
     # Buscar en PATH del sistema
@@ -396,17 +387,15 @@ def find_7zip_path() -> Optional[Path]:
         sevenzip_path = shutil.which("7z.exe")
         if sevenzip_path:
             path = Path(sevenzip_path).parent
-            logger.info(f"7-Zip encontrado en PATH: {path}")
             return path
         
         # Intentar con where en Windows
         result = subprocess.run(["where", "7z.exe"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             path = Path(result.stdout.strip()).parent
-            logger.info(f"7-Zip encontrado con 'where': {path}")
             return path
     except Exception as e:
-        logger.warning(f"Error al buscar 7-Zip en PATH: {e}")
+        logger.debug(f"Error al buscar 7-Zip en PATH: {e}")
     
     # Buscar en el registro de Windows
     try:
@@ -422,7 +411,6 @@ def find_7zip_path() -> Optional[Path]:
                         if install_dir:
                             path = Path(install_dir)
                             if path.exists() and (path / "7z.exe").exists():
-                                logger.info(f"7-Zip encontrado en registro: {path}")
                                 return path
                 except:
                     continue
@@ -457,7 +445,6 @@ def find_sqlcmd_path() -> Optional[Path]:
     # Buscar en rutas comunes
     for path in common_paths:
         if path.exists():
-            logger.info(f"sqlcmd encontrado en: {path}")
             return path
     
     # Buscar en PATH del sistema
@@ -466,17 +453,15 @@ def find_sqlcmd_path() -> Optional[Path]:
         sqlcmd_path = shutil.which("sqlcmd")
         if sqlcmd_path:
             path = Path(sqlcmd_path)
-            logger.info(f"sqlcmd encontrado en PATH: {path}")
             return path
         
         # Intentar con where en Windows
         result = subprocess.run(["where", "sqlcmd"], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             path = Path(result.stdout.strip())
-            logger.info(f"sqlcmd encontrado con 'where': {path}")
             return path
     except Exception as e:
-        logger.warning(f"Error al buscar sqlcmd en PATH: {e}")
+        logger.debug(f"Error al buscar sqlcmd en PATH: {e}")
     
     # Buscar en el registro de Windows
     try:
@@ -502,7 +487,6 @@ def find_sqlcmd_path() -> Optional[Path]:
                                         if install_dir:
                                             bin_path = Path(install_dir) / "Tools" / "Binn" / "sqlcmd.exe"
                                             if bin_path.exists():
-                                                logger.info(f"sqlcmd encontrado en registro: {bin_path}")
                                                 return bin_path
                                     except:
                                         continue
@@ -550,7 +534,6 @@ def backup_mysql_database(
         if not backup_path.is_dir():
             try:
                 backup_path.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Directorio de respaldo creado: {backup_dir}")
             except Exception as e:
                 raise ValueError(f"No se pudo crear el directorio {backup_dir}: {e}")
         
@@ -591,7 +574,7 @@ def backup_mysql_database(
         temp_backup_name = f"{client}_{device}_backup_{timestamp}_{unique_id}.sql"
         temp_backup_path = temp_dir / temp_backup_name
         
-        logger.info(f"Iniciando respaldo SQL en {temp_backup_path}")
+        logger.info(f"Backup MySQL: {client} -> {backup_dir}")
         
         
         mysqldump_cmd = [
@@ -605,7 +588,7 @@ def backup_mysql_database(
         
         # Ejecutar el comando de forma segura (sin mostrar contraseña en logs)
         safe_cmd = ' '.join(mysqldump_cmd).replace(decrypted_password or "", "********")
-        logger.info(f"Ejecutando: {safe_cmd}")
+        logger.debug(f"Ejecutando: {safe_cmd}")
         
         startupinfo = None
         if hasattr(subprocess, 'STARTUPINFO'):
@@ -646,7 +629,6 @@ def backup_mysql_database(
                 f.write("check")
             if check_file.exists():
                 check_file.unlink()
-            logger.info(f"Permisos de escritura verificados en: {backup_path}")
         except Exception as e:
             logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
             raise ValueError(f"No se tienen permisos de escritura en el directorio de respaldo: {backup_path}")
@@ -661,7 +643,6 @@ def backup_mysql_database(
             try:
                 # Intentar eliminar el archivo existente
                 seven_zip_file_path.unlink()
-                logger.info(f"Archivo existente eliminado: {seven_zip_file_path}")
             except Exception as e:
                 # Si no se puede eliminar, usar un nombre alternativo
                 unique_id = str(uuid.uuid4())[:8]
@@ -684,7 +665,7 @@ def backup_mysql_database(
 
         # Ejecutar el comando de forma segura
         safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD or "", "********")
-        logger.info(f"Ejecutando: {safe_compress_cmd}")
+        logger.debug(f"Ejecutando: {safe_compress_cmd}")
 
         # Intentar comprimir con múltiples reintentos si es necesario
         max_compression_retries = 3
@@ -703,7 +684,6 @@ def backup_mysql_database(
                 
                 # Verificar resultado
                 if seven_zip_process.returncode == 0:
-                    logger.info("Compresión 7-Zip exitosa")
                     break
                 else:
                     # Si falló, pero estamos en el último intento, lanzar excepción
@@ -717,7 +697,7 @@ def backup_mysql_database(
                         )
                     else:
                         # Si no es el último intento, esperar y reintentar
-                        logger.warning(f"Error en 7-Zip (intento {retry+1}): {seven_zip_process.stderr}")
+                        logger.debug(f"Error en 7-Zip (intento {retry+1}), reintentando...")
                         time.sleep((retry + 1) * 2)  # Esperar más tiempo en cada reintento
             except subprocess.TimeoutExpired:
                 logger.error("Timeout durante la compresión")
@@ -741,8 +721,6 @@ def backup_mysql_database(
         if file_size == 0:
             raise ValueError(f"El archivo comprimido está vacío: {seven_zip_file_path}")
 
-        logger.info(f"Archivo comprimido creado: {seven_zip_file_path} ({file_size} bytes)")
-
         if update_callback:
             update_callback(70, "Eliminando archivo temporal...")
 
@@ -755,14 +733,12 @@ def backup_mysql_database(
                 
                 if temp_backup_path.exists():
                     temp_backup_path.unlink()
-                    logger.info(f"Archivo temporal eliminado: {temp_backup_path}")
                     break
                 else:
-                    logger.info(f"Archivo temporal ya no existe: {temp_backup_path}")
                     break
             except Exception as e:
                 if retry < max_delete_retries - 1:
-                    logger.warning(f"Error al eliminar archivo temporal (intento {retry+1}): {e}")
+                    logger.debug(f"Error al eliminar archivo temporal (intento {retry+1}): {e}")
                     time.sleep((retry + 1) * 2)  # Aumentar tiempo de espera con cada reintento
                 else:
                     logger.error(f"No se pudo eliminar el archivo temporal después de {max_delete_retries} intentos")
@@ -790,7 +766,7 @@ def backup_mysql_database(
         # Gestionar límite de respaldos
         manage_backup_limit(backup_dir, amount)
         
-        logger.info(f"Respaldo completado con éxito: {seven_zip_file_path}")
+        logger.info(f"Backup MySQL completado: {seven_zip_file_path.name} ({file_size} bytes)")
         return True
         
     except Exception as e:
@@ -833,7 +809,6 @@ def backup_sqlserver_database(
         if not backup_path.is_dir():
             try:
                 backup_path.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Directorio de respaldo creado: {backup_dir}")
             except Exception as e:
                 raise ValueError(f"No se pudo crear el directorio {backup_dir}: {e}")
         
@@ -847,12 +822,8 @@ def backup_sqlserver_database(
         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M')
         timestamp_email = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]} {timestamp[8:10]}:{timestamp[10:12]}"
         
-        # Log de parámetros de conexión (sin contraseña)
-        logger.info(f"Iniciando respaldo SQL Server:")
-        logger.info(f"  Servidor: {server}")
-        logger.info(f"  Usuario: {username}")
-        logger.info(f"  Base de datos: {database}")
-        logger.info(f"  Tipo de servidor: {server_data.get('server_type', 'No especificado')}")
+        # Log de inicio
+        logger.info(f"Backup SQL Server: {client}/{database} ({server}) -> {backup_dir}")
         
         decrypted_password = decrypt(KEY, password).decode("utf-8")
         
@@ -873,9 +844,6 @@ def backup_sqlserver_database(
         if not seven_zip_path:
             logger.error("No se pudo encontrar 7-Zip en el sistema")
             raise FileNotFoundError("No se pudo encontrar la instalación de 7-Zip. Verifique que 7-Zip esté instalado.")
-        
-        logger.info(f"Usando sqlcmd: {sqlcmd_bin_path}")
-        logger.info(f"Usando 7-Zip: {seven_zip_path}")
         
         # Cambiar al directorio de sqlcmd y ejecutar el backup
         if update_callback:
@@ -906,7 +874,6 @@ def backup_sqlserver_database(
                 check_file.unlink()
                 
                 temp_dir = temp_test_dir
-                logger.info(f"Directorio temporal seleccionado: {temp_dir}")
                 break
                 
             except Exception as e:
@@ -916,7 +883,7 @@ def backup_sqlserver_database(
             # Si ningún directorio temporal funciona, usar el directorio de destino directamente
             temp_dir = backup_path / f"temp_backup_{unique_id}"
             temp_dir.mkdir(parents=True, exist_ok=True)
-            logger.warning(f"Usando directorio de destino para archivo temporal: {temp_dir}")
+            logger.debug(f"Usando directorio de destino para archivo temporal: {temp_dir}")
         
         # Usar un nombre único para el archivo temporal
         temp_backup_name = f"{client}_{device}_{database}_backup_{timestamp}_{unique_id}.bak"
@@ -935,25 +902,20 @@ def backup_sqlserver_database(
                     # Comando para dar permisos completos al directorio temporal
                     perm_cmd = f'icacls "{temp_dir}" /grant Users:F /t'
                     subprocess.run(perm_cmd, shell=True, capture_output=True, text=True, check=False)
-                    logger.info(f"Permisos configurados para: {temp_dir}")
                 except Exception as perm_error:
-                    logger.warning(f"No se pudieron configurar permisos: {perm_error}")
+                    logger.debug(f"No se pudieron configurar permisos: {perm_error}")
                     
         except Exception as e:
-            logger.warning(f"Error al configurar permisos: {e}")
-        
-        logger.info(f"Iniciando respaldo SQL Server en {temp_backup_path}")
+            logger.debug(f"Error al configurar permisos: {e}")
         
         # Preparar comando SQL para el respaldo
         backup_sql = f"BACKUP DATABASE [{database}] TO DISK = N'{temp_backup_path}' WITH FORMAT, INIT, NAME = N'{database}-Full Database Backup', SKIP, NOREWIND, NOUNLOAD, STATS = 10"
         
         # Comando sqlcmd - Usar autenticación de Windows si el server_type lo indica
         server_type = server_data.get("server_type", "")
-        logger.info(f"Configurando comando sqlcmd para: {server_type}")
         
         if "Windows Authentication" in server_type:
             # Autenticación de Windows - usar -E
-            logger.info("Usando autenticación de Windows (-E)")
             sqlcmd_cmd = [
                 str(sqlcmd_bin_path),
                 "-S", server,
@@ -962,7 +924,6 @@ def backup_sqlserver_database(
             ]
         else:
             # Autenticación SQL Server - usar -U y -P
-            logger.info("Usando autenticación SQL Server (-U/-P)")
             if not username:
                 raise ValueError("Se requiere un nombre de usuario para autenticación SQL Server")
             if not decrypted_password:
@@ -981,15 +942,15 @@ def backup_sqlserver_database(
             safe_cmd = ' '.join(sqlcmd_cmd)
         else:
             safe_cmd = ' '.join(sqlcmd_cmd).replace(decrypted_password, "********")
-        logger.info(f"Ejecutando: {safe_cmd}")
+        logger.debug(f"Ejecutando: {safe_cmd}")
         
         startupinfo = None
-        if hasattr(subprocess, 'STARTUPINFO'):
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
+        if hasattr(subprocess, 'STARTUPINFO'):  # type: ignore
+            startupinfo = subprocess.STARTUPINFO()  # type: ignore
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore
+            startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore
         
-        process = subprocess.run(
+        process = subprocess.run(  # type: ignore
             sqlcmd_cmd,
             shell=False,
             capture_output=True,
@@ -1020,7 +981,7 @@ def backup_sqlserver_database(
             else:
                 user_error_msg += f"- Detalles técnicos: {process.stderr or process.stdout}"
             
-            raise subprocess.CalledProcessError(process.returncode, safe_cmd,
+            raise subprocess.CalledProcessError(process.returncode, safe_cmd,  # type: ignore
                                               output=process.stdout, stderr=user_error_msg)
         else:
             # Comando exitoso, pero verificar si hay mensajes de error en stdout
@@ -1060,7 +1021,6 @@ def backup_sqlserver_database(
                 f.write("check")
             if check_file.exists():
                 check_file.unlink()
-            logger.info(f"Permisos de escritura verificados en: {backup_path}")
         except Exception as e:
             logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
             raise ValueError(f"No se tienen permisos de escritura en el directorio de respaldo: {backup_path}")
@@ -1071,8 +1031,6 @@ def backup_sqlserver_database(
         seven_zip_file_path = backup_path / seven_zip_file_name
 
         # Comprimir con 7-Zip
-        logger.info(f"Comprimiendo respaldo en {seven_zip_file_path}")
-
         compress_cmd = [
             str(seven_zip_path / "7z.exe"),
             "a",
@@ -1083,12 +1041,12 @@ def backup_sqlserver_database(
         ]
         
         safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD or "", "********")
-        logger.info(f"Ejecutando: {safe_compress_cmd}")
+        logger.debug(f"Ejecutando: {safe_compress_cmd}")
         
         max_compression_retries = 3
         for retry in range(max_compression_retries):
             try:
-                seven_zip_process = subprocess.run(
+                seven_zip_process = subprocess.run(  # type: ignore
                     compress_cmd,
                     shell=False,
                     capture_output=True,
@@ -1099,21 +1057,20 @@ def backup_sqlserver_database(
                 )
                 
                 if seven_zip_process.returncode == 0:
-                    logger.info("Compresión 7-Zip exitosa")
                     break
                 else:
                     if retry == max_compression_retries - 1:
                         logger.error(f"Error en 7-Zip después de {max_compression_retries} intentos: {seven_zip_process.stderr}")
-                        raise subprocess.CalledProcessError(
+                        raise subprocess.CalledProcessError(  # type: ignore
                             seven_zip_process.returncode,
                             safe_compress_cmd,
                             output=seven_zip_process.stdout,
                             stderr=seven_zip_process.stderr
                         )
                     else:
-                        logger.warning(f"Error en 7-Zip (intento {retry+1}): {seven_zip_process.stderr}")
+                        logger.debug(f"Error en 7-Zip (intento {retry+1}), reintentando...")
                         time.sleep((retry + 1) * 2)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired:  # type: ignore
                 logger.error("Timeout durante la compresión")
                 if retry == max_compression_retries - 1:
                     raise ValueError("La compresión no pudo completarse por timeout")
@@ -1128,8 +1085,6 @@ def backup_sqlserver_database(
         if file_size == 0:
             raise ValueError(f"El archivo comprimido está vacío: {seven_zip_file_path}")
         
-        logger.info(f"Archivo comprimido creado: {seven_zip_file_path} ({file_size} bytes)")
-        
         if update_callback:
             update_callback(70, "Eliminando archivo temporal...")
         
@@ -1140,14 +1095,12 @@ def backup_sqlserver_database(
                 time.sleep(1)
                 if temp_backup_path.exists():
                     temp_backup_path.unlink()
-                    logger.info(f"Archivo temporal eliminado: {temp_backup_path}")
                     break
                 else:
-                    logger.info(f"Archivo temporal ya no existe: {temp_backup_path}")
                     break
             except Exception as e:
                 if retry < max_delete_retries - 1:
-                    logger.warning(f"Error al eliminar archivo temporal (intento {retry+1}): {e}")
+                    logger.debug(f"Error al eliminar archivo temporal (intento {retry+1}): {e}")
                     time.sleep((retry + 1) * 2)
                 else:
                     logger.error(f"No se pudo eliminar el archivo temporal después de {max_delete_retries} intentos")
@@ -1177,7 +1130,7 @@ def backup_sqlserver_database(
         # Gestionar límite de respaldos
         manage_backup_limit(backup_dir, amount)
         
-        logger.info(f"Respaldo SQL Server completado con éxito: {seven_zip_file_path}")
+        logger.info(f"Backup SQL Server completado: {seven_zip_file_path.name} ({file_size} bytes)")
         return True
         
     except Exception as e:
@@ -1231,7 +1184,7 @@ def send_email(client: str, message: str) -> bool:
             # Enviar el correo
             server.send_message(email_message)
             
-        logger.info(f"Correo enviado a {RECEIVER_EMAIL} - Asunto: {subject}")
+        logger.debug(f"Correo enviado: {subject}")
         return True
     except smtplib.SMTPAuthenticationError as e:
         logger.error(f"Error de autenticación al enviar correo: {e}")
@@ -1253,7 +1206,6 @@ def manage_backup_limit(backup_dir: str, amount: int) -> bool:
     """
     try:
         if not amount or amount <= 0:
-            logger.info("No se ha establecido límite de respaldos")
             return True
             
         backup_path = Path(backup_dir)
@@ -1264,10 +1216,9 @@ def manage_backup_limit(backup_dir: str, amount: int) -> bool:
         
         # Eliminar archivos antiguos que exceden el límite
         if len(files) > amount:
-            logger.info(f"Eliminando {len(files) - amount} respaldos antiguos")
+            logger.debug(f"Eliminando {len(files) - amount} respaldos antiguos")
             for file in files[amount:]:
                 file.unlink()
-                logger.info(f"Archivo antiguo eliminado: {file}")
                 
         return True
     except Exception as e:

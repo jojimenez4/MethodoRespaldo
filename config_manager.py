@@ -107,8 +107,6 @@ class ConfigManager:
         self._status_lock = threading.RLock()
         self._server_lock = threading.RLock()
         
-        logger.info(f"Usando archivos de configuración: {self.status_file}, {self.server_file}")
-        
         # Intentar crear archivos por defecto si no existen
         self._ensure_files_exist()
         
@@ -159,14 +157,13 @@ class ConfigManager:
         # Verificar cada campo en el estado del programa
         for key, default_value in default_state.items():
             if key not in self.program_state:
-                logger.info(f"Campo '{key}' faltante en el estado, añadiendo valor predeterminado: {default_value}")
+                logger.debug(f"Campo '{key}' faltante, añadiendo: {default_value}")
                 self.program_state[key] = default_value
                 updated = True
         
         # Guardar el estado actualizado si hay cambios
         if updated:
             self.save_state(self.status_file, self.program_state)
-            logger.info("Estado del programa actualizado con campos faltantes")
     
     def load_state(self, filepath: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
         """
@@ -214,7 +211,7 @@ class ConfigManager:
                             # Intentar recuperar desde backup
                             backup_path = filepath_obj.with_suffix(f".bak")
                             if backup_path.exists():
-                                logger.info(f"Intentando recuperar desde backup: {backup_path}")
+                                logger.debug(f"Intentando recuperar desde backup: {backup_path}")
                                 try:
                                     with open(backup_path, 'r', encoding='utf-8') as bf:
                                         backup_content = bf.read()
@@ -229,10 +226,9 @@ class ConfigManager:
                                     logger.error(f"Error al recuperar desde backup: {be}")
                             
                             # Si no hay backup o falló, intentar reparar
-                            logger.info(f"Intentando reparar archivo corrupto")
                             repaired = self._try_repair_json(content)
                             if repaired:
-                                logger.info(f"Archivo {filepath} reparado exitosamente")
+                                logger.info(f"Archivo {filepath} reparado")
                                 # Guardar el archivo reparado
                                 self.save_state(filepath, repaired)
                                 return repaired
@@ -288,7 +284,7 @@ class ConfigManager:
                 # Copia el archivo corrupto a la copia de seguridad
                 import shutil
                 shutil.copy2(filepath, backup_path)
-                logger.info(f"Copia de seguridad creada en {backup_path}")
+                logger.debug(f"Copia de seguridad creada en {backup_path}")
         except Exception as e:
             logger.error(f"Error al crear copia de seguridad: {e}")
     
@@ -496,7 +492,7 @@ class ConfigManager:
         Returns:
             True si la configuración fue exitosa, False en caso contrario
         """
-        logger.info(f"Configurando respaldo programado: {hours}h:{minutes}m (enabled={enabled})")
+        logger.debug(f"Configurando respaldo programado: {hours}h:{minutes}m (enabled={enabled})")
         return self.update_program_state(
             backup_hours=hours,
             backup_minutes=minutes,
@@ -507,7 +503,7 @@ class ConfigManager:
         """
         Fuerza el guardado completo del estado actual en el archivo.
         """
-        logger.info("Forzando guardado completo del estado")
+        logger.debug("Forzando guardado completo del estado")
         
         # Asegurar que todos los campos necesarios existan
         self._ensure_complete_state()
@@ -522,7 +518,7 @@ class ConfigManager:
         Repara el archivo de estado para asegurar que contiene todos los campos necesarios.
         """
         try:
-            logger.info("Iniciando reparación del archivo de estado")
+            logger.debug("Iniciando reparación del archivo de estado")
             
             # Cargar el estado actual desde el archivo
             current_state = None
@@ -537,7 +533,6 @@ class ConfigManager:
             # Si no hay estado o está vacío, usar el predeterminado
             if not current_state:
                 current_state = self._default_program_state()
-                logger.info("Usando estado predeterminado para reparación")
             
             # Asegurar que todos los campos necesarios existan
             default_state = self._default_program_state()
@@ -552,7 +547,7 @@ class ConfigManager:
             # Actualizar el estado en memoria
             self.program_state = current_state
             
-            logger.info("Reparación completada exitosamente")
+            logger.info("Reparación completada")
             return True
         except Exception as e:
             logger.error(f"Error durante la reparación del archivo de estado: {e}", exc_info=True)

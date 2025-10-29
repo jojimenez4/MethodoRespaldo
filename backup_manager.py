@@ -87,7 +87,6 @@ class BackupScheduler:
                 with open(self._lock_file_path, 'w') as f:
                     f.write(lock_info)
                 
-                logger.info(f"Bloqueo de proceso adquirido")
                 return True
                 
             except Exception as e:
@@ -107,7 +106,6 @@ class BackupScheduler:
         try:
             if os.path.exists(self._lock_file_path):
                 os.remove(self._lock_file_path)
-                logger.info("Bloqueo de proceso liberado")
             return True
         except Exception as e:
             logger.error(f"Error al liberar bloqueo de proceso: {e}")
@@ -157,7 +155,6 @@ class BackupScheduler:
             
             # Limpiar programaciones anteriores (muy importante para evitar duplicados)
             schedule.clear()
-            logger.info("Limpiadas todas las tareas anteriores del programador")
             
             # Calcular intervalo en segundos
             interval_seconds = (hours * 3600) + (minutes * 60)
@@ -166,7 +163,7 @@ class BackupScheduler:
                 interval_seconds = 14400  # 4 horas como mínimo
                 
             self._interval_seconds = interval_seconds
-            logger.info(f"Programando respaldo cada {interval_seconds} segundos ({hours}h:{minutes}m)")
+            logger.info(f"Backup programado: cada {hours}h:{minutes}m")
             
             # Función wrapper para mejorar el manejo de errores y concurrencia
             def safe_backup_execution():
@@ -182,7 +179,6 @@ class BackupScheduler:
                     return False
                 
                 try:
-                    logger.info(f"Ejecutando respaldo programado ({hours}h:{minutes}m)")
                     self._last_execution = time.time()
                     self._is_backup_running = True
                     
@@ -190,7 +186,6 @@ class BackupScheduler:
                     result = backup_func(*args, **kwargs)
                     
                     if result:
-                        logger.info("Respaldo programado completado exitosamente")
                         self._missed_executions = 0  # Resetear contador de fallos
                     else:
                         logger.error("Respaldo programado falló")
@@ -226,11 +221,9 @@ class BackupScheduler:
             self.running = True
             self.scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
             self.scheduler_thread.start()
-            logger.info("Hilo del programador de respaldos iniciado")
 
     def _run_scheduler(self) -> None:
         """Ejecuta el programador de tareas en un bucle."""
-        logger.info("Iniciando programador de respaldos")
         while self.running and self.scheduled:
             try:
                 schedule.run_pending()
@@ -290,25 +283,23 @@ class BackupScheduler:
                             job = schedule.every(self._interval_seconds).seconds.do(safe_backup_execution)
                             job.tag("scheduled_backup")
                             self._missed_executions = 0
-                            logger.info("Scheduler reiniciado después de detectar ejecuciones perdidas")
+                            logger.debug("Scheduler reiniciado después de detectar ejecuciones perdidas")
                 
                 time.sleep(1)
             except Exception as e:
                 logger.error(f"Error en el bucle del programador: {e}", exc_info=True)
                 # Pequeña pausa antes de continuar para evitar bucles de error muy rápidos
                 time.sleep(5)
-        logger.info("Programador de respaldos detenido")
     
     def stop(self) -> None:
         """Detiene el programador de respaldos."""
         with self._lock:
             self.running = False
             self.scheduled = False
-            logger.info("Programador de respaldos marcado para detenerse")
             
             # Si hay un respaldo en ejecución, esperar a que termine
             if self._is_backup_running:
-                logger.info("Esperando a que termine el respaldo en ejecución...")
+                logger.debug("Esperando a que termine el respaldo en ejecución...")
                 # No esperar indefinidamente
                 timeout = 300  # 5 minutos máximo
                 start_time = time.time()
