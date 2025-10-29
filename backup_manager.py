@@ -18,7 +18,8 @@ from typing import Dict, Any, Optional, Callable, List, Tuple
 
 from functions import (
     decrypt, send_email, manage_backup_limit, find_mysql_bin_path, 
-    find_7zip_path, KEY, DATABASE, USER, BACKUP_PASSWORD, logger
+    find_7zip_path, find_sqlcmd_path, backup_sqlserver_database,
+    KEY, DATABASE, USER, BACKUP_PASSWORD, logger
 )
 
 class BackupScheduler:
@@ -42,6 +43,12 @@ class BackupScheduler:
         
         # Archivo para controlar concurrencia entre procesos
         self._lock_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup_lock.txt")
+        
+        # Store original backup function and parameters for recreation
+        self._backup_func = None
+        self._backup_args = None
+        self._backup_kwargs = None
+        self._interval_seconds = None
     
     def _acquire_process_lock(self, timeout=30) -> bool:
         """
@@ -68,7 +75,6 @@ class BackupScheduler:
                         self._release_process_lock()
                     else:
                         logger.warning("Otro proceso está ejecutando un respaldo. Esperando...")                       
-                        # Esperar un tiempo antes de reintentar
                         time.sleep(5)
                         continue
                 
@@ -81,7 +87,6 @@ class BackupScheduler:
                 with open(self._lock_file_path, 'w') as f:
                     f.write(lock_info)
                 
-                logger.debug(f"Bloqueo de proceso adquirido: {lock_info}")
                 return True
                 
             except Exception as e:
@@ -101,7 +106,6 @@ class BackupScheduler:
         try:
             if os.path.exists(self._lock_file_path):
                 os.remove(self._lock_file_path)
-                logger.debug("Bloqueo de proceso liberado")
             return True
         except Exception as e:
             logger.error(f"Error al liberar bloqueo de proceso: {e}")
@@ -126,6 +130,11 @@ class BackupScheduler:
             **kwargs: Argumentos nombrados para la función de respaldo
         """
         with self._lock:
+            # Store function and parameters for later recreation
+            self._backup_func = backup_func
+            self._backup_args = args
+            self._backup_kwargs = kwargs
+            
             # Validar parámetros
             try:
                 hours = int(hours)
@@ -146,7 +155,6 @@ class BackupScheduler:
             
             # Limpiar programaciones anteriores (muy importante para evitar duplicados)
             schedule.clear()
-            logger.info("Limpiadas todas las tareas anteriores del programador")
             
             # Calcular intervalo en segundos
             interval_seconds = (hours * 3600) + (minutes * 60)
@@ -154,7 +162,8 @@ class BackupScheduler:
                 logger.warning("Intervalo de respaldo demasiado pequeño, ajustando a 4 horas")
                 interval_seconds = 14400  # 4 horas como mínimo
                 
-            logger.info(f"Programando respaldo cada {interval_seconds} segundos ({hours}h:{minutes}m)")
+            self._interval_seconds = interval_seconds
+            logger.info(f"Backup programado: cada {hours}h:{minutes}m")
             
             # Función wrapper para mejorar el manejo de errores y concurrencia
             def safe_backup_execution():
@@ -170,7 +179,6 @@ class BackupScheduler:
                     return False
                 
                 try:
-                    logger.info(f"Ejecutando respaldo programado ({hours}h:{minutes}m)")
                     self._last_execution = time.time()
                     self._is_backup_running = True
                     
@@ -178,7 +186,6 @@ class BackupScheduler:
                     result = backup_func(*args, **kwargs)
                     
                     if result:
-                        logger.info("Respaldo programado completado exitosamente")
                         self._missed_executions = 0  # Resetear contador de fallos
                     else:
                         logger.error("Respaldo programado falló")
@@ -204,25 +211,6 @@ class BackupScheduler:
             # Marcar como programado
             self.scheduled = True
             
-            # Programar un primer respaldo para prueba (después de 1 minuto)
-            if hours > 1 or (hours == 1 and minutes > 10):
-                logger.info("Programando respaldo inicial de prueba en 1 minuto")
-                test_job = schedule.every(1).minutes.do(safe_backup_execution)
-                test_job.tag("test_backup")
-                
-                # Eliminar la tarea de prueba después de ejecutarse
-                def remove_test_task():
-                    try:
-                        for job in schedule.get_jobs("test_backup"):
-                            schedule.cancel_job(job)
-                        logger.info("Tarea de prueba eliminada")
-                    except Exception as e:
-                        logger.error(f"Error al eliminar tarea de prueba: {e}")
-                
-                # Programar eliminación de la tarea de prueba
-                cleanup_job = schedule.every(2).minutes.do(remove_test_task)
-                cleanup_job.tag("cleanup")
-            
             # Si no hay un hilo de scheduler en ejecución, iniciarlo
             if self.scheduler_thread is None or not self.scheduler_thread.is_alive():
                 self.start_scheduler_thread()
@@ -233,11 +221,9 @@ class BackupScheduler:
             self.running = True
             self.scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
             self.scheduler_thread.start()
-            logger.info("Hilo del programador de respaldos iniciado")
 
     def _run_scheduler(self) -> None:
         """Ejecuta el programador de tareas en un bucle."""
-        logger.info("Iniciando programador de respaldos")
         while self.running and self.scheduled:
             try:
                 schedule.run_pending()
@@ -247,35 +233,73 @@ class BackupScheduler:
                 jobs = schedule.get_jobs("scheduled_backup")
                 
                 if jobs and self._last_execution > 0:
-                    job = jobs[0]
                     # Calcular tiempo que debería haber pasado
                     # Si han pasado más del doble del tiempo programado, puede haber un problema
                     if self._missed_executions > 3:
                         logger.warning(f"Detectadas {self._missed_executions} ejecuciones perdidas. Reiniciando scheduler.")
-                        # Reiniciar job
-                        schedule.clear("scheduled_backup")
-                        job = schedule.every(job.interval).seconds.do(job.job_func)
-                        job.tag("scheduled_backup")
-                        self._missed_executions = 0
-                        logger.info("Scheduler reiniciado después de detectar ejecuciones perdidas")
+                        # Recreate job using stored function and parameters
+                        if self._backup_func and self._interval_seconds:
+                            schedule.clear("scheduled_backup")
+                            
+                            def safe_backup_execution():
+                                if not self._backup_semaphore.acquire(blocking=False):
+                                    logger.warning("Ya hay un respaldo en ejecución. Omitiendo esta ejecución.")
+                                    return False
+                                
+                                if not self._acquire_process_lock():
+                                    logger.warning("Ya hay un respaldo en ejecución en otro proceso. Omitiendo esta ejecución.")
+                                    self._backup_semaphore.release()
+                                    return False
+                                
+                                try:
+                                    self._last_execution = time.time()
+                                    self._is_backup_running = True
+                                    
+                                    # Check if backup function is available
+                                    if self._backup_func is None:
+                                        logger.error("No hay función de respaldo disponible")
+                                        self._missed_executions += 1
+                                        return False
+                                    
+                                    # Ensure args and kwargs are not None
+                                    args = self._backup_args if self._backup_args is not None else ()
+                                    kwargs = self._backup_kwargs if self._backup_kwargs is not None else {}
+                                    
+                                    result = self._backup_func(*args, **kwargs)
+                                    if result:
+                                        self._missed_executions = 0
+                                    else:
+                                        self._missed_executions += 1
+                                    return result
+                                except Exception as e:
+                                    self._missed_executions += 1
+                                    logger.error(f"Error al ejecutar respaldo programado: {e}", exc_info=True)
+                                    return False
+                                finally:
+                                    self._is_backup_running = False
+                                    self._release_process_lock()
+                                    self._backup_semaphore.release()
+                            
+                            job = schedule.every(self._interval_seconds).seconds.do(safe_backup_execution)
+                            job.tag("scheduled_backup")
+                            self._missed_executions = 0
+                            logger.debug("Scheduler reiniciado después de detectar ejecuciones perdidas")
                 
                 time.sleep(1)
             except Exception as e:
                 logger.error(f"Error en el bucle del programador: {e}", exc_info=True)
                 # Pequeña pausa antes de continuar para evitar bucles de error muy rápidos
                 time.sleep(5)
-        logger.info("Programador de respaldos detenido")
     
     def stop(self) -> None:
         """Detiene el programador de respaldos."""
         with self._lock:
             self.running = False
             self.scheduled = False
-            logger.info("Programador de respaldos marcado para detenerse")
             
             # Si hay un respaldo en ejecución, esperar a que termine
             if self._is_backup_running:
-                logger.info("Esperando a que termine el respaldo en ejecución...")
+                logger.debug("Esperando a que termine el respaldo en ejecución...")
                 # No esperar indefinidamente
                 timeout = 300  # 5 minutos máximo
                 start_time = time.time()
@@ -321,6 +345,102 @@ class BackupManager:
         """Inicializa el gestor de respaldos."""
         self.scheduler = BackupScheduler()
     
+    def backup_database(
+        self,
+        server_data: Dict[str, Any],
+        backup_dir: str,
+        client: str,
+        amount: int,
+        update_callback: Optional[Callable[[int, str], None]] = None
+    ) -> bool:
+        """
+        Realiza un respaldo de la base de datos según su tipo.
+        
+        Args:
+            server_data: Datos del servidor
+            backup_dir: Directorio donde se almacenará el backup
+            client: Nombre del cliente
+            amount: Cantidad máxima de backups a mantener
+            update_callback: Función de callback para actualizar el progreso
+            
+        Returns:
+            True si el backup fue exitoso, False en caso contrario
+        """
+        server_type = server_data.get("server_type")
+        
+        if server_type == "MySQL Server (TCP/IP)":
+            return self.backup_mysql_database(
+                server_data.get("password", ""),
+                backup_dir,
+                client,
+                amount,
+                server_data,
+                update_callback
+            )
+        elif server_type == "SQL Server (Windows Authentication)":
+            return self.backup_sqlserver_database(
+                server_data,
+                backup_dir,
+                client,
+                amount,
+                update_callback
+            )
+        else:
+            logger.error(f"Tipo de servidor no soportado: {server_type}")
+            return False
+    
+    def backup_sqlserver_database(
+        self,
+        server_data: Dict[str, Any],
+        backup_dir: str,
+        client: str,
+        amount: int,
+        update_callback: Optional[Callable[[int, str], None]] = None
+    ) -> bool:
+        """
+        Realiza un respaldo de la base de datos SQL Server.
+        
+        Args:
+            server_data: Datos del servidor SQL Server
+            backup_dir: Directorio donde se almacenará el backup
+            client: Nombre del cliente
+            amount: Cantidad máxima de backups a mantener
+            update_callback: Función de callback para actualizar el progreso
+            
+        Returns:
+            True si el backup fue exitoso, False en caso contrario
+        """
+        try:
+            server = server_data.get("host", "localhost")
+            username = server_data.get("user", "sa")
+            password = server_data.get("password", "")
+            database = server_data.get("database", "")
+            
+            if not password:
+                raise ValueError("Contraseña no configurada para SQL Server")
+            
+            if not database:
+                raise ValueError("Base de datos no especificada para SQL Server")
+            
+            # Usar la función de respaldo específica para SQL Server
+            return backup_sqlserver_database(
+                server=server,
+                username=username,
+                password=password,
+                database=database,
+                backup_dir=backup_dir,
+                client=client,
+                amount=amount,
+                server_data=server_data,
+                update_callback=update_callback
+            )
+            
+        except Exception as e:
+            error_message = f"Error en el proceso de respaldo SQL Server: {e}"
+            logger.error(error_message, exc_info=True)
+            send_email(client, f"Error ocurrido al respaldar datos SQL Server: {e}")
+            return False
+
     def backup_mysql_database(
         self,
         password: str, 
@@ -451,11 +571,11 @@ class BackupManager:
 
             # Verificar que el directorio destino tenga permisos de escritura
             try:
-                test_file = backup_path / "test_write.tmp"
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                if test_file.exists():
-                    test_file.unlink()
+                check_file = backup_path / "check_write.tmp"
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                if check_file.exists():
+                    check_file.unlink()
                 logger.info(f"Permisos de escritura verificados en: {backup_path}")
             except Exception as e:
                 logger.error(f"Sin permisos de escritura en {backup_path}: {e}")
@@ -494,7 +614,7 @@ class BackupManager:
             ]
 
             # Ejecutar el comando de forma segura
-            safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD, "********")
+            safe_compress_cmd = ' '.join(compress_cmd).replace(BACKUP_PASSWORD or "", "********")
             logger.info(f"Ejecutando: {safe_compress_cmd}")
 
             # Crear startupinfo para ocultar ventanas de consola
@@ -506,6 +626,7 @@ class BackupManager:
 
             # Intentar comprimir con múltiples reintentos si es necesario
             max_compression_retries = 3
+            seven_zip_process = None  # Initialize to avoid unbound variable error
             for retry in range(max_compression_retries):
                 try:
                     seven_zip_process = subprocess.run(
@@ -567,13 +688,8 @@ class BackupManager:
             max_delete_retries = 5
             for retry in range(max_delete_retries):
                 try:
-                    # Asegurar que los procesos han terminado
-                    if 'seven_zip_process' in locals() and seven_zip_process:
-                        try:
-                            if hasattr(seven_zip_process, 'kill'):
-                                seven_zip_process.kill()
-                        except:
-                            pass
+                    # Los procesos subprocess.run() ya han terminado automáticamente
+                    # No necesitamos hacer kill() en objetos CompletedProcess
                             
                     # Esperar un momento antes de intentar eliminar
                     time.sleep(1)
@@ -649,16 +765,17 @@ class BackupManager:
             Tuple con (éxito, mensaje)
         """
         try:
-            zip_path = Path(zip_path)
-            if not zip_path.exists():
+            zip_path_obj = Path(zip_path)
+            if not zip_path_obj.exists():
                 raise FileNotFoundError(f"El archivo {zip_path} no existe")
                 
             if output_dir is None:
-                output_dir = zip_path.parent
+                output_dir = str(zip_path_obj.parent)
+                output_dir_obj = zip_path_obj.parent
             else:
-                output_dir = Path(output_dir)
-                if not output_dir.exists():
-                    output_dir.mkdir(parents=True)
+                output_dir_obj = Path(output_dir)
+                if not output_dir_obj.exists():
+                    output_dir_obj.mkdir(parents=True)
             
             seven_zip_path = find_7zip_path()
             if not seven_zip_path:
@@ -689,8 +806,8 @@ class BackupManager:
                 logger.error(f"Error al desencriptar: {process.stderr}")
                 raise subprocess.CalledProcessError(process.returncode, safe_cmd)
                 
-            logger.info(f"Archivo desencriptado exitosamente en {output_dir}")
-            return True, f"Archivo desencriptado exitosamente en {output_dir}"
+            logger.info(f"Archivo desencriptado exitosamente en {output_dir_obj}")
+            return True, f"Archivo desencriptado exitosamente en {output_dir_obj}"
         except Exception as e:
             error_msg = f"Error al desencriptar archivo: {e}"
             logger.error(error_msg)

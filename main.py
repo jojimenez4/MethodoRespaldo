@@ -8,6 +8,13 @@ import schedule
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# Importar psutil AQUÍ para que PyInstaller lo detecte
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 # Determinar si la aplicación está empaquetada con PyInstaller
 def is_bundled():
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
@@ -41,6 +48,9 @@ def setup_logging():
     # Asegurar que el directorio de logs existe
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
     
+    # Limpiar handlers existentes para evitar duplicación
+    logger.handlers.clear()
+    
     # Configurar manejadores de logs
     file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -51,6 +61,9 @@ def setup_logging():
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logger.addHandler(console_handler)
+    
+    # Evitar propagación al root logger
+    logger.propagate = False
     
     logger.info(f"Iniciando aplicación MethodoRespaldo desde: {APP_DIR}")
     if is_bundled():
@@ -76,18 +89,8 @@ def ensure_app_directories():
         except Exception as e:
             logger.error(f"Error al crear directorio {directory}: {e}")
 
-# Configuración inicial de logging básico para capturar errores tempranos
-try:
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format=LOG_FORMAT,
-        filename=LOG_FILE,
-        filemode='a'
-    )
-except Exception as e:
-    # Si no podemos configurar logging, al menos mostrar error en consola
-    print(f"Error al configurar logging inicial: {e}")
+# NO configurar logging.basicConfig aquí - se hace en setup_logging()
+# Esto evita duplicación de logs
 
 # Ahora importamos el resto de módulos
 try:
@@ -97,17 +100,11 @@ try:
     from views import create_login_interface, create_system_tray_icon, AppState
 except Exception as e:
     logger.critical(f"Error al importar módulos: {e}", exc_info=True)
-    print(f"Error crítico al importar módulos: {e}")
     sys.exit(1)
 
 def parse_arguments():
     """Procesa los argumentos de línea de comandos."""
     parser = argparse.ArgumentParser(description="Sistema de respaldo de bases de datos")
-    parser.add_argument(
-        '--debug', 
-        action='store_true',
-        help='Activa el modo debug con más información en logs'
-    )
     parser.add_argument(
         '--backup-now', 
         action='store_true',
@@ -116,7 +113,12 @@ def parse_arguments():
     parser.add_argument(
         '--service', 
         action='store_true',
-        help='Ejecuta la aplicación como servicio Windows'
+        help='Ejecuta la aplicación como servicio Windows (modo legacy/NSSM)'
+    )
+    parser.add_argument(
+        '--native-service',
+        action='store_true',
+        help='Ejecuta como servicio nativo de Windows (v2.0 con pywin32)'
     )
     return parser.parse_args()
 
@@ -152,11 +154,11 @@ def start_scheduled_backups():
             logger.info(f"Directorio de respaldo verificado: {backup_dir}")
             
             # Verificar permisos intentando escribir un archivo temporal
-            test_file = os.path.join(backup_dir, "test_write.tmp")
+            check_file = os.path.join(backup_dir, "check_write.tmp")
             try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                os.remove(check_file)
                 logger.info(f"Permiso de escritura en directorio verificado")
             except Exception as write_error:
                 logger.error(f"Error de permisos de escritura en {backup_dir}: {write_error}")
@@ -177,6 +179,18 @@ def start_scheduled_backups():
         server_data = config_manager.get_server_data()
         if not server_data:
             logger.error("No hay datos de servidor configurados")
+            return False
+        
+        # Validar tipo de servidor
+        server_type = server_data.get("server_type")
+        if not server_type:
+            logger.error("Tipo de servidor no especificado en la configuración")
+            return False
+        
+        logger.info(f"Servicio configurado para tipo de servidor: {server_type}")
+        
+        if server_type not in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
+            logger.error(f"Tipo de servidor no soportado: {server_type}")
             return False
             
         if not server_data.get("password"):
@@ -214,18 +228,19 @@ def start_scheduled_backups():
                     # Verificar que el directorio existe y se puede escribir
                     try:
                         os.makedirs(backup_directory, exist_ok=True)
-                        test_file = os.path.join(backup_directory, "test_write.tmp")
-                        with open(test_file, 'w') as f:
-                            f.write("test")
-                        if os.path.exists(test_file):
-                            os.remove(test_file)
+                        check_file = os.path.join(backup_directory, "check_write.tmp")
+                        with open(check_file, 'w') as f:
+                            f.write("check")
+                        if os.path.exists(check_file):
+                            os.remove(check_file)
                         logger.info(f"Directorio de respaldo verificado con permisos: {backup_directory}")
                     except Exception as dir_error:
                         logger.error(f"Error de permisos en directorio de respaldo: {dir_error}")
                         return False
                     
                     # Registrar inicio de respaldo
-                    logger.info(f"Iniciando respaldo programado para {client_name} en {backup_directory}")
+                    server_type = server_data_copy.get("server_type", "Desconocido")
+                    logger.info(f"Iniciando respaldo programado para {client_name} ({server_type}) en {backup_directory}")
                     
                     # Actualizar estado antes de ejecutar
                     config_manager.update_program_state(
@@ -234,13 +249,12 @@ def start_scheduled_backups():
                         timestamp=datetime.datetime.now().isoformat()
                     )
                     
-                    # Ejecutar respaldo
-                    result = backup_manager.backup_mysql_database(
-                        password,
+                    # Ejecutar respaldo usando método genérico que detecta el tipo de servidor
+                    result = backup_manager.backup_database(
+                        server_data_copy,
                         backup_directory,
                         client_name,
-                        amount_value,
-                        server_data_copy
+                        amount_value
                     )
                     
                     # Actualizar estado al finalizar
@@ -307,23 +321,28 @@ def run_as_service():
     """Ejecuta la aplicación en modo servicio."""
     logger.info("Iniciando aplicación en modo servicio")
     
-    # Configurar logger específico para modo servicio
+    # Configurar logger específico para modo servicio (solo si no está configurado ya)
     try:
-        service_handler = logging.FileHandler(SERVICE_LOG_FILE, encoding='utf-8')
-        service_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-        logger.addHandler(service_handler)
+        # Verificar si ya existe un FileHandler para SERVICE_LOG_FILE
+        has_service_handler = any(
+            isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(SERVICE_LOG_FILE)
+            for h in logger.handlers
+        )
         
-        # Remover manejador de consola en modo servicio
-        for handler in list(logger.handlers):
-            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
-                logger.removeHandler(handler)
-                
-        # Aumentar nivel de detalle del logging en modo servicio
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Configuración de logging en modo servicio completada")
+        if not has_service_handler:
+            service_handler = logging.FileHandler(SERVICE_LOG_FILE, encoding='utf-8')
+            service_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+            logger.addHandler(service_handler)
+            
+            # Remover manejador de consola en modo servicio
+            for handler in list(logger.handlers):
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                    logger.removeHandler(handler)
+                    
+            logger.info("Configuración de logging en modo servicio completada")
     except Exception as e:
         # No podemos usar logger aquí si falló la configuración
-        print(f"Error al configurar logs de servicio: {e}")
+        pass
     
     # Verificar y eliminar archivos de bloqueo obsoletos al inicio
     try:
@@ -336,11 +355,11 @@ def run_as_service():
     
     try:
         # Inicializar administradores de configuración y respaldo
-        logger.debug("Inicializando ConfigManager para modo servicio")
+        logger.info("Inicializando ConfigManager para modo servicio")
         config_manager = ConfigManager()
         
         # Forzar reparación del archivo de estado antes de comenzar
-        logger.debug("Reparando archivo de estado")
+        logger.info("Reparando archivo de estado")
         config_manager.repair_state_file()
         
         # Registrar estado actual para diagnóstico
@@ -378,7 +397,7 @@ def run_as_service():
                         consecutive_errors = 0
                     
                     # Dormir para no consumir CPU
-                    time.sleep(10)  # Revisamos cada 10 segundos (más frecuente que 60)
+                    time.sleep(10)
                     
                     # Cada 5 minutos, verificar que todo esté bien
                     current_time = time.time()
@@ -386,9 +405,6 @@ def run_as_service():
                         last_error_time = current_time
                         
                         # Verificar y reparar estado
-                        logger.debug("Verificación periódica de estado")
-                        
-                        # Recargar estado
                         program_state = config_manager.get_program_state()
                         server_data = config_manager.get_server_data()
                         
@@ -422,15 +438,15 @@ def run_as_service():
                             success = start_scheduled_backups()
                             if success:
                                 logger.info("Configuración reparada y scheduler reiniciado")
-                                consecutive_errors = 0  # Resetear contador
+                                consecutive_errors = 0
                             else:
                                 logger.error("Error al reparar configuración")
                         except Exception as repair_error:
                             logger.critical(f"Error al intentar reparar: {repair_error}", exc_info=True)
-                    
-                    # Esperar antes del siguiente intento (tiempo creciente con el número de errores)
-                    backoff_time = min(60, 5 * consecutive_errors)  # Máximo 60 segundos
-                    time.sleep(backoff_time)
+                
+                # Esperar antes del siguiente intento
+                backoff_time = min(60, 5 * consecutive_errors)
+                time.sleep(backoff_time)
         else:
             logger.error("No se pudo iniciar el servicio de respaldo")
             return 1
@@ -455,18 +471,30 @@ def run_backup_immediate():
             try:
                 # Verificar que el directorio de respaldo existe
                 backup_dir = program_state.get("backup_dir")
-                os.makedirs(backup_dir, exist_ok=True)
+                if backup_dir:
+                    os.makedirs(backup_dir, exist_ok=True)
+                else:
+                    logger.error("No se encontró directorio de respaldo configurado")
+                    return 1
+                
+                # Log del tipo de servidor para diagnóstico
+                server_type = server_data.get("server_type", "No especificado")
+                logger.info(f"Ejecutando respaldo inmediato para tipo de servidor: {server_type}")
                 
                 backup_manager = BackupManager()
-                backup_manager.backup_mysql_database(
-                    server_data["password"],
+                result = backup_manager.backup_database(
+                    server_data,
                     program_state["backup_dir"],
                     server_data.get("client", "Cliente"),
-                    program_state.get("amount", 5),
-                    server_data
+                    program_state.get("amount", 5)
                 )
-                logger.info("Respaldo inmediato completado")
-                return 0
+                
+                if result:
+                    logger.info("Respaldo inmediato completado exitosamente")
+                    return 0
+                else:
+                    logger.error("El respaldo inmediato falló")
+                    return 1
             except Exception as e:
                 logger.error(f"Error en respaldo inmediato: {e}", exc_info=True)
                 return 1
@@ -486,16 +514,70 @@ def initialize_app():
         # Asegurar que los directorios necesarios existan
         ensure_app_directories()
         
-        # Procesar argumentos
+        # Detectar si está siendo llamado por el Service Control Manager (SCM)
+        # El SCM ejecuta servicios desde services.exe
+        def is_running_as_service():
+            """Detecta si el proceso está siendo ejecutado como servicio de Windows"""
+            if not PSUTIL_AVAILABLE or 'psutil' not in sys.modules:
+                return False
+                
+            try:
+                import psutil as ps  # Import local para evitar unbound
+                parent = ps.Process().parent()
+                parent_name = parent.name().lower() if parent else "NONE"
+                if parent and parent_name == 'services.exe':
+                    logger.info("Servicio iniciado por Windows SCM")
+                    return True
+            except Exception as e:
+                logger.debug(f"Error detectando proceso padre: {e}")
+            return False
+        
+        # Si se detecta --native-service O si está siendo ejecutado por services.exe
+        is_service_call = '--native-service' in sys.argv or (len(sys.argv) == 1 and is_running_as_service())
+        
+        if is_service_call:
+            try:
+                from windows_service import MethodoRespaldoService, is_pywin32_available
+                
+                if not is_pywin32_available():
+                    logger.error("pywin32 no disponible - usando modo servicio legacy")
+                    return run_as_service()
+                
+                # Remover --native-service de sys.argv si está presente
+                if '--native-service' in sys.argv:
+                    sys.argv.remove('--native-service')
+                
+                # Iniciar servicio nativo
+                import win32serviceutil
+                import servicemanager
+                
+                # Si solo queda el ejecutable en sys.argv, el SCM está iniciando el servicio
+                if len(sys.argv) == 1:
+                    logger.info("Iniciando servicio Windows nativo v2.0")
+                    servicemanager.Initialize()
+                    servicemanager.PrepareToHostSingle(MethodoRespaldoService)
+                    servicemanager.StartServiceCtrlDispatcher()
+                    return 0
+                else:
+                    # Si hay argumentos (install, remove, debug, etc), usar HandleCommandLine
+                    logger.info(f"Ejecutando comando: {' '.join(sys.argv[1:])}")
+                    win32serviceutil.HandleCommandLine(MethodoRespaldoService)
+                    return 0
+                
+            except ImportError as e:
+                logger.error(f"Error importando windows_service: {e}")
+                logger.info("Cambiando a modo servicio legacy...")
+                return run_as_service()
+            except Exception as e:
+                logger.error(f"Error en servicio nativo: {e}", exc_info=True)
+                return 1
+        
+        # Procesar argumentos normales
         args = parse_arguments()
         
-        # Configurar nivel de log según argumentos
-        if args.debug:
-            logger.setLevel(logging.DEBUG)
-            logger.debug("Modo debug activado")
-        
-        # Si se solicita ejecución como servicio
+        # Si se solicita ejecución como servicio (modo legacy/NSSM para compatibilidad v1.0)
         if args.service or is_service_mode():
+            logger.info("Iniciando en modo servicio legacy (compatibilidad v1.0)")
             return run_as_service()
         
         # Si se solicita respaldo inmediato
@@ -510,7 +592,7 @@ def initialize_app():
         try:
             logger.critical(f"Error fatal al iniciar la aplicación: {e}", exc_info=True)
         except:
-            print(f"Error crítico: {e}")
+            pass
         return 1
 
 if __name__ == "__main__":
@@ -521,5 +603,5 @@ if __name__ == "__main__":
         try:
             logger.critical(f"Error no capturado: {e}", exc_info=True)
         except:
-            print(f"Error crítico no manejado: {e}")
+            pass
         sys.exit(1)

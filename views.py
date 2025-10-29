@@ -17,7 +17,7 @@ from users_management import UserManagementWindow
 import logging
 
 from functions import (
-    encrypt, bd_connect_mysql, send_email,
+    encrypt, bd_connect_mysql, bd_connect_sqlserver, send_email,
     save_state, program_state, server_data_state, KEY, STATUS_PROGRAM, 
     SERVER_DATA, decrypt_backup_file, logger
 )
@@ -59,7 +59,7 @@ class AppState:
             cls.backup_minutes = minutes
 
 # Funciones de utilidad
-def center_window(window: customtkinter.CTk, width: int, height: int) -> None:
+def center_window(window, width: int, height: int) -> None:
     """Centrar una ventana en la pantalla."""
     screen_width = window.winfo_screenwidth()
     screen_height = window.winfo_screenheight()
@@ -163,6 +163,13 @@ def create_login_interface():
                     port = server_data_state.get("port")
                     password = server_data_state.get("password")
                     
+                    # Verificar que los datos necesarios estén disponibles
+                    if not host or not port or not password:
+                        logger.error("Datos de conexión incompletos en el estado del servidor")
+                        messagebox.showerror("Error", "Datos de conexión incompletos.")
+                        create_server_interface()
+                        return
+                    
                     # Verificar conexión
                     connection_result = bd_connect_mysql(host, port, password)
                     connection_success = connection_result[1]
@@ -172,6 +179,29 @@ def create_login_interface():
                     else:
                         logger.error(f"Error de conexión a BD: {connection_result[0]}")
                         messagebox.showerror("Error", "No se pudo conectar a la base de datos.")
+                        create_server_interface()
+                elif server_type == "SQL Server (Windows Authentication)":
+                    host = server_data_state.get("host")
+                    user = server_data_state.get("user")
+                    database = server_data_state.get("database")
+                    password = server_data_state.get("password")
+                    
+                    # Verificar que los datos necesarios estén disponibles
+                    if not host or not user or not database or not password:
+                        logger.error("Datos de conexión incompletos en el estado del servidor SQL Server")
+                        messagebox.showerror("Error", "Datos de conexión incompletos.")
+                        create_server_interface()
+                        return
+                    
+                    # Verificar conexión
+                    connection_result = bd_connect_sqlserver(host, user, password, database)
+                    connection_success = connection_result[1]
+                    
+                    if connection_success:
+                        open_backup_interface(server_data_state)
+                    else:
+                        logger.error(f"Error de conexión a SQL Server: {connection_result[0]}")
+                        messagebox.showerror("Error", "No se pudo conectar a la base de datos SQL Server.")
                         create_server_interface()
                 else:
                     create_server_interface()
@@ -202,7 +232,7 @@ def create_login_interface():
                     password_entry.configure(state="normal")
                     login_button.configure(state="normal")
                 
-                login_window.after(30000, unlock_login)  # 30 segundos
+                login_window.after(30000, unlock_login)
 
     # Botón de inicio de sesión
     login_button = customtkinter.CTkButton(frame, text="Iniciar sesión", command=verify_login, fg_color="green")
@@ -224,7 +254,7 @@ def create_server_interface() -> None:
     """Crea la interfaz para conectar al servidor de base de datos."""
     server_window = customtkinter.CTk() 
     server_window.title("Conectar al Servidor de Base de Datos")
-    center_window(server_window, 800, 350)
+    center_window(server_window, 800, 500)
 
     frame = customtkinter.CTkFrame(server_window, corner_radius=10)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
@@ -257,11 +287,50 @@ def create_server_interface() -> None:
     port_entry.insert(0, "3306")
     port_entry.pack(side="left", pady=5, padx=(0, 10))
 
+    # Frame para usuario (solo para SQL Server)
+    user_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
+    user_frame.pack(pady=5, padx=5, fill="x")
+
+    user_label = customtkinter.CTkLabel(user_frame, text="Usuario:", width=30)
+    user_label.pack(side="left", pady=5, padx=(110, 0))
+    user_entry = customtkinter.CTkEntry(user_frame)
+    user_entry.insert(0, "sa")
+    user_entry.pack(side="left", pady=5, padx=(0, 10))
+
+    # Frame para base de datos (solo para SQL Server)
+    database_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
+    database_frame.pack(pady=5, padx=5, fill="x")
+
+    database_label = customtkinter.CTkLabel(database_frame, text="Base de Datos:", width=30)
+    database_label.pack(side="left", pady=5, padx=(110, 0))
+    database_entry = customtkinter.CTkEntry(database_frame)
+    database_entry.pack(side="left", pady=5, padx=(0, 10))
+
     # Campo de contraseña
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
     password_label.pack(pady=5)
     password_entry = customtkinter.CTkEntry(frame, show="*")
     password_entry.pack(pady=5)
+
+    # Inicialmente ocultar campos específicos de SQL Server
+    user_frame.pack_forget()
+    database_frame.pack_forget()
+
+    # Función para mostrar/ocultar campos según tipo de servidor
+    def on_server_type_change(selected_type):
+        if selected_type == "SQL Server (Windows Authentication)":
+            user_frame.pack(pady=5, padx=5, fill="x", before=password_label)
+            database_frame.pack(pady=5, padx=5, fill="x", before=password_label)
+            port_entry.delete(0, "end")
+            port_entry.insert(0, "1433")
+        else:
+            user_frame.pack_forget()
+            database_frame.pack_forget()
+            port_entry.delete(0, "end")
+            port_entry.insert(0, "3306")
+
+    # Vincular cambio de tipo de servidor
+    server_type.configure(command=on_server_type_change)
 
     # Verificación de conexión al servidor
     def verify_server() -> None:
@@ -312,8 +381,41 @@ def create_server_interface() -> None:
                 else:
                     logger.error(f"Error en conexión MySQL: {client}")
                     messagebox.showerror("Error", f"Error en la conexión a la base de datos MySQL: {client}")
+            
             elif server_type_selected == "SQL Server (Windows Authentication)":
-                messagebox.showinfo("Información", "Funcionalidad para SQL Server en desarrollo.")
+                username = user_entry.get().strip()
+                database = database_entry.get().strip()
+                
+                if not username:
+                    raise ValueError("El nombre de usuario no puede estar vacío")
+                
+                if not database:
+                    raise ValueError("El nombre de la base de datos no puede estar vacío")
+                
+                client, connection_success = bd_connect_sqlserver(host, username, encrypted_password, database)
+                
+                if connection_success:
+                    # Guardar configuración de conexión
+                    server_data = {
+                        "server_type": server_type_selected,
+                        "host": host,
+                        "port": port,
+                        "user": username,
+                        "database": database,
+                        "password": encrypted_password,
+                        "client": client,
+                        "last_connection": datetime.datetime.now().isoformat()
+                    }
+                    
+                    save_state(SERVER_DATA, server_data)
+                    messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos SQL Server. Cliente: {client}")
+                    
+                    logger.info(f"Conexión exitosa a SQL Server: {host}:{port} - Cliente: {client}")
+                    server_window.destroy()
+                    open_backup_interface(server_data)
+                else:
+                    logger.error(f"Error en conexión SQL Server: {client}")
+                    messagebox.showerror("Error", f"Error en la conexión a la base de datos SQL Server: {client}")
             else:
                 messagebox.showerror("Error", "No se ha seleccionado ninguna base de datos.")
         except ValueError as ve:
@@ -661,11 +763,11 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
 
     # Función para ejecutar respaldo
     def execute_backup(
-    folder: str, 
-    server_data: Dict[str, Any], 
-    backup_hours: Optional[int], 
-    backup_minutes: Optional[int]
-) -> None:
+        folder: str, 
+        server_data: Dict[str, Any], 
+        backup_hours: Optional[int], 
+        backup_minutes: Optional[int]
+    ) -> None:
         """Ejecuta un respaldo de la base de datos."""
         nonlocal folder_path
         folder_path = folder
@@ -685,13 +787,13 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     messagebox.showerror("Error", f"No se pudo crear el directorio: {e}")
                     return
             
-            # Verificar permisos escribiendo un archivo de prueba
-            test_file = os.path.join(folder_path, "test_write.tmp")
+            # Verificar permisos escribiendo un archivo temporal
+            check_file = os.path.join(folder_path, "check_write.tmp")
             try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                if os.path.exists(test_file):
-                    os.unlink(test_file)
+                with open(check_file, 'w') as f:
+                    f.write("check")
+                if os.path.exists(check_file):
+                    os.unlink(check_file)
                 logger.info(f"Permisos de escritura verificados en: {folder_path}")
             except Exception as perm_error:
                 logger.error(f"Error de permisos de escritura: {perm_error}")
@@ -720,7 +822,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
         progressbar = ttk.Progressbar(progress_frame, mode='determinate', length=280)
         progressbar.pack(pady=10, padx=10)
 
-        # Etiqueta para mostrar el estado actual
+        # Etiqueta para mostrar el estado currente
         progress_label = customtkinter.CTkLabel(progress_frame, text="Iniciando respaldo...")
         progress_label.pack(pady=5)
 
@@ -741,7 +843,8 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 progress_window.destroy()
                 return
 
-            if server_data["server_type"] == "MySQL Server (TCP/IP)":
+            server_type = server_data.get("server_type")
+            if server_type in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
                 try:
                     # Actualizar el estado del programa de manera segura usando ConfigManager
                     config_manager.update_program_state(
@@ -754,16 +857,29 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     # Lanzar el respaldo en un hilo separado
                     def run_backup() -> None:
                         try:
-                            # Crear instancia de BackupManager en lugar de llamar a función
+                            # Crear instancia de BackupManager
                             backup_manager = BackupManager()
-                            result = backup_manager.backup_mysql_database(
-                                server_data["password"], 
-                                folder_path, 
-                                server_data.get("client", "Cliente"), 
-                                AppState.selected_amount,
-                                server_data,  # Añadir server_data como parámetro
-                                update_callback=update_progress
-                            )
+                            
+                            # Ejecutar respaldo según el tipo de servidor
+                            if server_type == "MySQL Server (TCP/IP)":
+                                result = backup_manager.backup_mysql_database(
+                                    server_data["password"], 
+                                    folder_path, 
+                                    server_data.get("client", "Cliente"), 
+                                    AppState.selected_amount,
+                                    server_data,
+                                    update_callback=update_progress
+                                )
+                            elif server_type == "SQL Server (Windows Authentication)":
+                                result = backup_manager.backup_sqlserver_database(
+                                    server_data,
+                                    folder_path,
+                                    server_data.get("client", "Cliente"),
+                                    AppState.selected_amount,
+                                    update_callback=update_progress
+                                )
+                            else:
+                                result = False
                             
                             # Actualizar al completar en el hilo principal
                             progress_window.after(0, lambda: completion_tasks(result))
@@ -854,6 +970,120 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                     
                     logger.error(f"Error al iniciar el respaldo: {e}", exc_info=True)
                     messagebox.showerror("Error", f"Error al iniciar el respaldo: {e}")
+            elif server_type == "SQL Server (Windows Authentication)":
+                try:
+                    # Actualizar el estado del programa de manera segura usando ConfigManager
+                    config_manager.update_program_state(
+                        running=True,
+                        status="in_progress",
+                        backup_dir=folder_path,
+                        progress=0
+                    )
+
+                    # Lanzar el respaldo en un hilo separado
+                    def run_backup() -> None:
+                        try:
+                            # Crear instancia de BackupManager
+                            backup_manager = BackupManager()
+                            
+                            # Ejecutar respaldo para SQL Server
+                            result = backup_manager.backup_sqlserver_database(
+                                server_data,
+                                folder_path,
+                                server_data.get("client", "Cliente"),
+                                AppState.selected_amount,
+                                update_callback=update_progress
+                            )
+                            
+                            # Actualizar al completar en el hilo principal
+                            progress_window.after(0, lambda: completion_tasks(result))
+                        except Exception as e:
+                            # Manejar errores en el hilo principal
+                            progress_window.after(0, lambda: handle_error(e))
+                    
+                    def completion_tasks(result=True) -> None:
+                        if not result:
+                            handle_error(Exception("El proceso de respaldo falló."))
+                            return
+                            
+                        update_progress(100, "Respaldo completado.")
+                        
+                        # Actualizar estado de manera segura
+                        config_manager.update_program_state(
+                            status="completed",
+                            client=server_data.get("client", "Cliente"),
+                            backup_dir=folder_path,
+                            amount=AppState.selected_amount,
+                            timestamp=datetime.datetime.now().isoformat(),
+                            progress=100
+                        )
+                        
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
+                        
+                        messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                        
+                        # Configurar programación si se solicitó
+                        if backup_hours or backup_minutes:
+                            # Programar respaldo con ConfigManager
+                            config_manager.set_backup_schedule(
+                                hours=backup_hours if backup_hours is not None else 4,
+                                minutes=backup_minutes if backup_minutes is not None else 0,
+                                enabled=True
+                            )
+                            
+                            # Forzar guardado completo para asegurar que todos los campos están presentes
+                            config_manager.force_save_all()
+                            
+                            ocultar_ventana()
+                            
+                            # Actualizar etiqueta de programación
+                            schedule_label.configure(
+                                text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
+                            )
+                            
+                            # Iniciar hilo de programación
+                            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+                                AppState.scheduled_backup_thread = threading.Thread(
+                                    target=run_scheduler, 
+                                    daemon=True
+                                )
+                                AppState.scheduled_backup_thread.start()
+                                
+                            messagebox.showinfo(
+                                "Info", 
+                                f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
+                            )
+                        else:
+                            messagebox.showinfo("Info", "Respaldo automático no programado.")
+                    
+                    def handle_error(e: Exception) -> None:
+                        config_manager.update_program_state(
+                            status="error",
+                            progress=0
+                        )
+                        
+                        if progress_window.winfo_exists():
+                            progress_window.destroy()
+                        
+                        logger.error(f"Error en el respaldo: {e}", exc_info=True)
+                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+                    
+                    # Iniciar el proceso de respaldo en un hilo separado
+                    backup_thread = threading.Thread(target=run_backup, daemon=True)
+                    backup_thread.start()
+                    
+                except Exception as e:
+                    config_manager.update_program_state(
+                        status="error",
+                        progress=0
+                    )
+                    
+                    if progress_window.winfo_exists():
+                        progress_window.destroy()
+                    
+                    logger.error(f"Error al iniciar el respaldo SQL Server: {e}", exc_info=True)
+                    messagebox.showerror("Error", f"Error al iniciar el respaldo SQL Server: {e}")
             else:
                 if progress_window.winfo_exists():
                     progress_window.destroy()
@@ -974,7 +1204,8 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 logger.error("No se recibieron los datos del servidor para respaldo programado")
                 return
                 
-            if server_data["server_type"] == "MySQL Server (TCP/IP)":
+            server_type = server_data.get("server_type")
+            if server_type in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
                 # Verificar que el directorio existe
                 if not os.path.exists(folder_path):
                     try:
@@ -988,35 +1219,47 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                         
                 # Verificar permisos
                 try:
-                    test_file = os.path.join(folder_path, "test_write.tmp")
-                    with open(test_file, 'w') as f:
-                        f.write("test")
-                    if os.path.exists(test_file):
-                        os.remove(test_file)
+                    check_file = os.path.join(folder_path, "check_write.tmp")
+                    with open(check_file, 'w') as f:
+                        f.write("check")
+                    if os.path.exists(check_file):
+                        os.remove(check_file)
                     logger.info("Permisos de escritura verificados en directorio de respaldo")
                 except Exception as perm_error:
                     logger.error(f"Error de permisos en directorio de respaldo: {perm_error}")
                     send_email(server_data.get("client", "Cliente"), 
                             f"Error de permisos en directorio de respaldo: {perm_error}")
                     return
-                    
+                
                 # Crear instancia de BackupManager para el respaldo programado
                 backup_manager = BackupManager()
-                result = backup_manager.backup_mysql_database(
-                    server_data["password"], 
-                    folder_path, 
-                    server_data.get("client", "Cliente"), 
-                    AppState.selected_amount,
-                    server_data  # Asegurarse de pasar server_data aquí
-                )
+                
+                # Ejecutar respaldo según el tipo
+                if server_type == "MySQL Server (TCP/IP)":
+                    result = backup_manager.backup_mysql_database(
+                        server_data["password"], 
+                        folder_path, 
+                        server_data.get("client", "Cliente"), 
+                        AppState.selected_amount,
+                        server_data
+                    )
+                elif server_type == "SQL Server (Windows Authentication)":
+                    result = backup_manager.backup_sqlserver_database(
+                        server_data,
+                        folder_path,
+                        server_data.get("client", "Cliente"),
+                        AppState.selected_amount
+                    )
+                else:
+                    result = False
                 
                 if result:
                     logger.info("Respaldo programado completado con éxito")
                 else:
                     logger.error("Respaldo programado completado con errores")
             else:
-                logger.error("Tipo de servidor no soportado para respaldo programado")
-                message = "Tipo de servidor no soportado para respaldo programado"
+                logger.error(f"Tipo de servidor no soportado para respaldo programado: {server_type}")
+                message = f"Tipo de servidor no soportado para respaldo programado: {server_type}"
                 send_email(server_data.get("client", "Cliente"), message)
         except Exception as e:
             logger.error(f"Error al ejecutar el respaldo automático: {e}", exc_info=True)
@@ -1116,6 +1359,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             logger.error(f"Error al obtener el historial de respaldos: {e}", exc_info=True)
             messagebox.showerror("Error", f"Error al obtener el historial de respaldos: {e}")
 
+    # Manejo del cierre de la ventana
     def on_closing() -> None:
         """Maneja el cierre de la ventana principal."""
         if AppState.scheduled:
@@ -1399,7 +1643,7 @@ def open_advance_options(parent_window: customtkinter.CTk, rounded_label: custom
             
             # Verificar contenido del archivo guardado
             state_after = config_manager.get_program_state()
-            logger.info(f"Estado después de guardar: {state_after}")
+            logger.info(f"Configuración guardada exitosamente")
             
             messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
             root.destroy()
@@ -1456,9 +1700,10 @@ def create_system_tray_icon() -> None:
     """Crea un ícono en la bandeja del sistema."""
     def show_window(icon, item) -> None:
         """Muestra la ventana principal."""
-        AppState.root_window.deiconify()
-        AppState.root_window.lift()
-        AppState.root_window.focus_force()
+        if AppState.root_window:
+            AppState.root_window.deiconify()
+            AppState.root_window.lift()
+            AppState.root_window.focus_force()
     
     def exit_app(icon, item) -> None:
         """Cierra la aplicación desde la bandeja del sistema."""
