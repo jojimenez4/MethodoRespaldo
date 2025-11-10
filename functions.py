@@ -27,8 +27,8 @@ assert subprocess is not None
 # Importar gestor de variables de entorno seguro
 from env_manager import EnvManager, load_dotenv
 
-# Configurar logging - Solo obtener el logger, NO configurar aquí
-logger = logging.getLogger(__name__)
+# Configurar logging - Usar el mismo nombre que el resto de la aplicación
+logger = logging.getLogger("BackupSystem")
 
 # Cargar variables de entorno (usa env_manager en lugar de dotenv)
 load_dotenv()

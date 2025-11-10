@@ -16,7 +16,7 @@ from typing import Dict, Any, Tuple, Optional, List
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Configuración de logging
-logger = logging.getLogger("BackupSystem.AuthManager")
+logger = logging.getLogger("BackupSystem")
 
 class AuthManager:
     """Administrador de autenticación de usuarios."""

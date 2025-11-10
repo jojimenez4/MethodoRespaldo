@@ -12,7 +12,7 @@ from typing import Dict, Any, Callable, Optional
 from auth_manager import AuthManager
 
 # Configuración de logging
-logger = logging.getLogger("BackupSystem.UsersManagement")
+logger = logging.getLogger("BackupSystem")
 
 class UserManagementWindow:
     """Ventana para gestionar usuarios."""

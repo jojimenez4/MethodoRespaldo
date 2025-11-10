@@ -93,6 +93,21 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
             Punto de entrada principal cuando el servicio inicia
             """
             try:
+                # CRÍTICO: Inicializar logging y directorios AQUÍ (después de StartServiceCtrlDispatcher)
+                import sys
+                import os
+                from pathlib import Path
+                
+                # Asegurar directorios
+                if getattr(sys, 'frozen', False):
+                    app_dir = Path(sys.executable).parent
+                else:
+                    app_dir = Path(__file__).parent
+                    
+                for directory in ['logs', 'temp', 'assets']:
+                    dir_path = app_dir / directory
+                    dir_path.mkdir(exist_ok=True)
+                
                 logger.info(f"Servicio MethodoRespaldo v2.0 iniciado - {self.app_dir}")
                 
                 # Reportar al SCM que estamos iniciando
@@ -169,15 +184,38 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
         
         def _execute_backup(self, backup_manager):
             """
-            Ejecuta un backup programado
+            Ejecuta un backup programado de todos los servidores habilitados
             """
             try:
-                result = backup_manager.backup_database()
+                from config_manager import ConfigManager
+                config_manager = ConfigManager()
+                program_state = config_manager.get_program_state()
                 
-                if result:
-                    logger.info("Backup completado")
+                backup_dir = program_state.get("backup_dir")
+                amount = program_state.get("amount", 5)
+                
+                if not backup_dir:
+                    logger.error("No hay directorio de backup configurado")
+                    return
+                
+                # Ejecutar backup de todos los servidores
+                results = backup_manager.backup_all_servers(
+                    backup_dir=backup_dir,
+                    amount=amount
+                )
+                
+                if not results:
+                    logger.warning("No hay servidores configurados")
+                    return
+                
+                # Resumen
+                successful = sum(1 for v in results.values() if v)
+                total = len(results)
+                
+                if successful == total:
+                    logger.info(f"Backup completado: {successful}/{total} exitosos")
                 else:
-                    logger.error("Backup falló")
+                    logger.warning(f"Backup parcial: {successful}/{total} exitosos")
                     
             except Exception as e:
                 logger.error(f"Error ejecutando backup: {e}", exc_info=True)

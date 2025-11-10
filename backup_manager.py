@@ -866,3 +866,84 @@ class BackupManager:
         except Exception as e:
             logger.error(f"Error al obtener historial de respaldos: {e}")
             return backup_history
+    
+    def backup_all_servers(
+        self,
+        backup_dir: str,
+        amount: int = 5,
+        update_callback: Optional[Callable[[int, str], None]] = None
+    ) -> Dict[str, bool]:
+        """
+        Realiza backup de todos los servidores habilitados.
+        
+        Args:
+            backup_dir: Directorio base para los backups
+            amount: Cantidad máxima de backups a mantener por servidor
+            update_callback: Función de callback para actualizar el progreso
+            
+        Returns:
+            Diccionario con server_id como clave y bool indicando éxito/fallo
+        """
+        from config_manager import ConfigManager
+        
+        config_manager = ConfigManager()
+        servers = config_manager.get_enabled_servers()
+        
+        if not servers:
+            logger.warning("No hay servidores habilitados para backup")
+            return {}
+        
+        results = {}
+        total_servers = len(servers)
+        
+        logger.info(f"Iniciando backup de {total_servers} servidores")
+        
+        for idx, server in enumerate(servers, 1):
+            server_id = server.get("id", f"server_{idx}")
+            server_name = server.get("name", server_id)
+            client = server.get("client", server_name)
+            
+            logger.info(f"[{idx}/{total_servers}] Iniciando backup: {server_name}")
+            
+            if update_callback:
+                progress = int((idx - 1) / total_servers * 100)
+                update_callback(progress, f"Backup {server_name}...")
+            
+            try:
+                # Crear subdirectorio para este servidor
+                server_backup_dir = os.path.join(backup_dir, server_id)
+                os.makedirs(server_backup_dir, exist_ok=True)
+                
+                # Realizar backup (sin pasar update_callback para evitar conflictos)
+                success = self.backup_database(
+                    server_data=server,
+                    backup_dir=server_backup_dir,
+                    client=client,
+                    amount=amount,
+                    update_callback=None  # No pasar callback individual
+                )
+                
+                results[server_id] = success
+                
+                if success:
+                    logger.info(f"✓ Backup exitoso: {server_name}")
+                    # Actualizar last_connection
+                    config_manager.update_server(
+                        server_id,
+                        {"last_connection": datetime.datetime.now().isoformat()}
+                    )
+                else:
+                    logger.error(f"✗ Backup fallido: {server_name}")
+                    
+            except Exception as e:
+                logger.error(f"✗ Error en backup de {server_name}: {e}", exc_info=True)
+                results[server_id] = False
+        
+        # Resumen final
+        successful = sum(1 for v in results.values() if v)
+        logger.info(f"Backup completado: {successful}/{total_servers} exitosos")
+        
+        if update_callback:
+            update_callback(100, f"Completado: {successful}/{total_servers} exitosos")
+        
+        return results

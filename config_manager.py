@@ -34,7 +34,7 @@ def get_base_directory():
 APP_DIR = get_base_directory()
 
 # Configuración de logging
-logger = logging.getLogger("BackupSystem.ConfigManager")
+logger = logging.getLogger("BackupSystem")
 
 @contextmanager
 def file_lock(filepath: str, timeout: float = 5.0):
@@ -97,15 +97,17 @@ def validate_json_structure(data: Any, expected_keys: Optional[set] = None) -> b
 class ConfigManager:
     """Administrador centralizado de configuración con soporte thread-safe."""
     
-    def __init__(self, status_file: str = "status.json", server_file: str = "server.json"):
+    def __init__(self, status_file: str = "status.json", server_file: str = "server.json", servers_file: str = "servers.json"):
         """Inicializa el administrador de configuración."""
         # Rutas absolutas para archivos
         self.status_file = os.path.join(APP_DIR, status_file)
         self.server_file = os.path.join(APP_DIR, server_file)
+        self.servers_file = os.path.join(APP_DIR, servers_file)
         
         # Locks para operaciones thread-safe
         self._status_lock = threading.RLock()
         self._server_lock = threading.RLock()
+        self._servers_lock = threading.RLock()
         
         # Intentar crear archivos por defecto si no existen
         self._ensure_files_exist()
@@ -114,8 +116,14 @@ class ConfigManager:
         with self._status_lock:
             self.program_state = self.load_state(self.status_file) or self._default_program_state()
         
+        # Legacy: server_data se carga bajo demanda para compatibilidad con código antiguo
         with self._server_lock:
-            self.server_data = self.load_state(self.server_file) or {}
+            self.server_data = {}
+            # Solo cargar si existe (sin generar warnings)
+            if os.path.exists(self.server_file):
+                loaded = self.load_state(self.server_file)
+                if loaded and isinstance(loaded, dict):
+                    self.server_data = loaded
         
         # Asegurar que los estados están completos
         self._ensure_complete_state()
@@ -127,10 +135,8 @@ class ConfigManager:
             logger.warning(f"Archivo {self.status_file} no encontrado, creando uno predeterminado")
             self.save_state(self.status_file, self._default_program_state())
             
-        # Verificar server.json
-        if not os.path.exists(self.server_file):
-            logger.warning(f"Archivo {self.server_file} no encontrado, creando uno predeterminado")
-            self.save_state(self.server_file, {})
+        # servers.json se creará automáticamente al añadir el primer servidor
+        # No crear server.json (obsoleto) para evitar warnings innecesarios
     
     def _default_program_state(self) -> Dict[str, Any]:
         """Retorna un estado predeterminado para el programa."""
@@ -165,7 +171,7 @@ class ConfigManager:
         if updated:
             self.save_state(self.status_file, self.program_state)
     
-    def load_state(self, filepath: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    def load_state(self, filepath: str, max_retries: int = 3) -> Optional[Any]:
         """
         Carga el estado desde un archivo JSON con manejo de errores robusto.
         
@@ -174,7 +180,7 @@ class ConfigManager:
             max_retries: Número máximo de reintentos
             
         Returns:
-            Diccionario con el estado o None si hay error
+            Diccionario, lista o None si hay error
         """
         filepath_obj = Path(filepath)
         
@@ -197,9 +203,9 @@ class ConfigManager:
                         try:
                             state = json.loads(content)
                             
-                            # Validar que es un diccionario
-                            if not isinstance(state, dict):
-                                logger.error(f"Archivo {filepath} no contiene un objeto JSON válido")
+                            # Validar que es un diccionario o lista (para servers.json)
+                            if not isinstance(state, (dict, list)):
+                                logger.error(f"Archivo {filepath} no contiene un objeto JSON válido (dict o list)")
                                 self._backup_corrupted_file(filepath)
                                 return None
                             
@@ -216,7 +222,7 @@ class ConfigManager:
                                     with open(backup_path, 'r', encoding='utf-8') as bf:
                                         backup_content = bf.read()
                                         backup_state = json.loads(backup_content)
-                                        if isinstance(backup_state, dict):
+                                        if isinstance(backup_state, (dict, list)):
                                             logger.info("Recuperación desde backup exitosa")
                                             # Restaurar el backup como archivo principal
                                             import shutil
@@ -288,13 +294,13 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"Error al crear copia de seguridad: {e}")
     
-    def save_state(self, filepath: str, state: Dict[str, Any], max_retries: int = 3) -> bool:
+    def save_state(self, filepath: str, state: Any, max_retries: int = 3) -> bool:
         """
         Guarda el estado en un archivo JSON de manera segura con retry logic y locks.
         
         Args:
             filepath: Ruta del archivo
-            state: Estado a guardar
+            state: Estado a guardar (dict, list o cualquier tipo JSON serializable)
             max_retries: Número máximo de reintentos
             
         Returns:
@@ -551,4 +557,163 @@ class ConfigManager:
             return True
         except Exception as e:
             logger.error(f"Error durante la reparación del archivo de estado: {e}", exc_info=True)
+            return False
+    
+    # ========== MÉTODOS PARA MÚLTIPLES SERVIDORES ==========
+    
+    def get_servers(self) -> list:
+        """
+        Obtiene la lista de todos los servidores configurados.
+        
+        Returns:
+            Lista de diccionarios con configuraciones de servidores
+        """
+        with self._servers_lock:
+            # Si existe servers.json, usarlo
+            if os.path.exists(self.servers_file):
+                servers = self.load_state(self.servers_file)
+                if isinstance(servers, list):
+                    return servers
+            
+            # Migración: Si existe server.json (singular) pero no servers.json
+            if os.path.exists(self.server_file):
+                single_server = self.load_state(self.server_file)
+                if single_server and isinstance(single_server, dict):
+                    # Convertir a formato de array
+                    migrated_server = {
+                        "id": "server_1",
+                        "name": single_server.get("client", "Servidor Principal"),
+                        "enabled": True,
+                        **single_server
+                    }
+                    servers = [migrated_server]
+                    # Guardar en el nuevo formato
+                    self.save_state(self.servers_file, servers)
+                    logger.info("Migración automática: server.json → servers.json")
+                    return servers
+            
+            # Si no hay nada, retornar lista vacía
+            return []
+    
+    def get_enabled_servers(self) -> list:
+        """
+        Obtiene solo los servidores habilitados.
+        
+        Returns:
+            Lista de servidores con enabled=True
+        """
+        all_servers = self.get_servers()
+        return [s for s in all_servers if s.get("enabled", True)]
+    
+    def add_server(self, server_config: Dict[str, Any]) -> bool:
+        """
+        Añade un nuevo servidor a la configuración.
+        
+        Args:
+            server_config: Diccionario con la configuración del servidor
+            
+        Returns:
+            True si se añadió correctamente
+        """
+        with self._servers_lock:
+            servers = self.get_servers()
+            
+            # Generar ID único
+            if "id" not in server_config:
+                existing_ids = [s.get("id", "") for s in servers]
+                counter = 1
+                while f"server_{counter}" in existing_ids:
+                    counter += 1
+                server_config["id"] = f"server_{counter}"
+            
+            # Añadir enabled por defecto
+            if "enabled" not in server_config:
+                server_config["enabled"] = True
+            
+            servers.append(server_config)
+            self.save_state(self.servers_file, servers)
+            logger.info(f"Servidor añadido: {server_config.get('name', server_config['id'])}")
+            return True
+    
+    def update_server(self, server_id: str, updates: Dict[str, Any]) -> bool:
+        """
+        Actualiza la configuración de un servidor existente.
+        
+        Args:
+            server_id: ID del servidor a actualizar
+            updates: Diccionario con los campos a actualizar
+            
+        Returns:
+            True si se actualizó correctamente
+        """
+        with self._servers_lock:
+            servers = self.get_servers()
+            
+            for server in servers:
+                if server.get("id") == server_id:
+                    server.update(updates)
+                    self.save_state(self.servers_file, servers)
+                    logger.info(f"Servidor actualizado: {server_id}")
+                    return True
+            
+            logger.warning(f"Servidor no encontrado: {server_id}")
+            return False
+    
+    def delete_server(self, server_id: str) -> bool:
+        """
+        Elimina un servidor de la configuración.
+        
+        Args:
+            server_id: ID del servidor a eliminar
+            
+        Returns:
+            True si se eliminó correctamente
+        """
+        with self._servers_lock:
+            servers = self.get_servers()
+            original_count = len(servers)
+            
+            servers = [s for s in servers if s.get("id") != server_id]
+            
+            if len(servers) < original_count:
+                self.save_state(self.servers_file, servers)
+                logger.info(f"Servidor eliminado: {server_id}")
+                return True
+            
+            logger.warning(f"Servidor no encontrado: {server_id}")
+            return False
+    
+    def clear_all_servers(self) -> bool:
+        """
+        Elimina todos los servidores de la configuración.
+        
+        Returns:
+            True si se eliminaron correctamente
+        """
+        with self._servers_lock:
+            self.save_state(self.servers_file, [])
+            logger.info("Todos los servidores eliminados")
+            return True
+    
+    def toggle_server(self, server_id: str) -> bool:
+        """
+        Habilita/deshabilita un servidor.
+        
+        Args:
+            server_id: ID del servidor
+            
+        Returns:
+            True si se cambió el estado
+        """
+        with self._servers_lock:
+            servers = self.get_servers()
+            
+            for server in servers:
+                if server.get("id") == server_id:
+                    server["enabled"] = not server.get("enabled", True)
+                    self.save_state(self.servers_file, servers)
+                    status = "habilitado" if server["enabled"] else "deshabilitado"
+                    logger.info(f"Servidor {server_id} {status}")
+                    return True
+            
             return False

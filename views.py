@@ -40,6 +40,7 @@ class AppState:
     selected_amount: int = 0
     app_icon: Optional[Any] = None
     root_window: Optional[customtkinter.CTk] = None
+    backup_in_progress: bool = False  # Flag para prevenir ejecuciones múltiples
     _lock = threading.Lock()  # Para operaciones thread-safe
     
     @classmethod
@@ -83,6 +84,13 @@ def load_app_image(filename: str) -> Image.Image:
 # Interfaz de login
 def create_login_interface():
     """Crea la interfaz de inicio de sesión."""
+    # Inicializar ConfigManager para crear archivos de configuración
+    try:
+        config = ConfigManager()
+        logger.info("Archivos de configuración inicializados")
+    except Exception as e:
+        logger.warning(f"Error inicializando configuración: {e}")
+    
     login_window = customtkinter.CTk()
     login_window.title("Login - Sistema de Respaldo")
     center_window(login_window, 400, 600)
@@ -152,7 +160,7 @@ def create_login_interface():
         success, user_data = auth_manager.verify_credentials(username, password)
         
         if success:
-            logger.info(f"Inicio de sesión exitoso: usuario {username}")
+            # El log ya se genera en auth_manager.verify_credentials()
             login_window.destroy()
             
             # Verificar si tenemos una sesión en curso
@@ -301,10 +309,19 @@ def create_server_interface() -> None:
     database_frame = customtkinter.CTkFrame(frame, fg_color=frame.cget("fg_color"))
     database_frame.pack(pady=5, padx=5, fill="x")
 
-    database_label = customtkinter.CTkLabel(database_frame, text="Base de Datos:", width=30)
+    database_label = customtkinter.CTkLabel(database_frame, text="Base de Datos(s):", width=30)
     database_label.pack(side="left", pady=5, padx=(110, 0))
-    database_entry = customtkinter.CTkEntry(database_frame)
+    database_entry = customtkinter.CTkEntry(database_frame, width=250)
     database_entry.pack(side="left", pady=5, padx=(0, 10))
+    
+    # Label de ayuda para múltiples bases
+    db_help_label = customtkinter.CTkLabel(
+        database_frame, 
+        text="Separe con ; para múltiples bases", 
+        font=("Arial", 9),
+        text_color="gray"
+    )
+    db_help_label.pack(side="left", pady=5, padx=(5, 0))
 
     # Campo de contraseña
     password_label = customtkinter.CTkLabel(frame, text="Contraseña:", width=20)
@@ -384,33 +401,83 @@ def create_server_interface() -> None:
             
             elif server_type_selected == "SQL Server (Windows Authentication)":
                 username = user_entry.get().strip()
-                database = database_entry.get().strip()
+                databases_input = database_entry.get().strip()
                 
                 if not username:
                     raise ValueError("El nombre de usuario no puede estar vacío")
                 
-                if not database:
+                if not databases_input:
                     raise ValueError("El nombre de la base de datos no puede estar vacío")
                 
-                client, connection_success = bd_connect_sqlserver(host, username, encrypted_password, database)
+                # Separar bases de datos por punto y coma
+                databases = [db.strip() for db in databases_input.split(';') if db.strip()]
+                
+                if not databases:
+                    raise ValueError("Debe especificar al menos una base de datos")
+                
+                # Verificar conexión con la primera base de datos
+                first_database = databases[0]
+                client, connection_success = bd_connect_sqlserver(host, username, encrypted_password, first_database)
                 
                 if connection_success:
-                    # Guardar configuración de conexión
+                    # Inicializar ConfigManager
+                    config_manager = ConfigManager()
+                    
+                    # IMPORTANTE: Limpiar servidores existentes para evitar duplicados
+                    config_manager.clear_all_servers()
+                    logger.info("Servidores anteriores limpiados, configurando nuevos servidores")
+                    
+                    # Crear entrada para cada base de datos en servers.json
+                    success_count = 0
+                    for idx, database in enumerate(databases, start=1):
+                        server_config = {
+                            "id": f"server_{idx}",
+                            "name": f"{client} - {database}",
+                            "enabled": True,
+                            "server_type": server_type_selected,
+                            "host": host,
+                            "port": port,
+                            "user": username,
+                            "database": database,
+                            "password": encrypted_password,
+                            "client": client
+                        }
+                        
+                        # Agregar o actualizar servidor
+                        if config_manager.add_server(server_config):
+                            success_count += 1
+                            # El log ya se genera en config_manager.add_server()
+                    
+                    # Guardar configuración de conexión para compatibilidad
                     server_data = {
                         "server_type": server_type_selected,
                         "host": host,
                         "port": port,
                         "user": username,
-                        "database": database,
+                        "database": first_database,  # Primera base para interfaz principal
                         "password": encrypted_password,
                         "client": client,
                         "last_connection": datetime.datetime.now().isoformat()
                     }
                     
                     save_state(SERVER_DATA, server_data)
-                    messagebox.showinfo("Éxito", f"Conexión exitosa a la base de datos SQL Server. Cliente: {client}")
                     
-                    logger.info(f"Conexión exitosa a SQL Server: {host}:{port} - Cliente: {client}")
+                    # Construir mensaje de éxito
+                    if len(databases) == 1:
+                        # Mensaje para una sola base de datos (mensaje tradicional)
+                        message = f"Conexión exitosa a la base de datos SQL Server.\n\nCliente: {client}"
+                    else:
+                        # Mensaje para múltiples bases de datos
+                        db_list = ", ".join(databases)
+                        message = (
+                            f"Conexión exitosa a la base de datos SQL Server.\n\n"
+                            f"Cliente: {client}\n"
+                            f"Configuradas {len(databases)} bases de datos:\n{db_list}"
+                        )
+                    
+                    messagebox.showinfo("Éxito", message)
+                    
+                    logger.info(f"Conexión exitosa a SQL Server: {host}:{port} - {len(databases)} base(s) de datos")
                     server_window.destroy()
                     open_backup_interface(server_data)
                 else:
@@ -770,6 +837,13 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     ) -> None:
         """Ejecuta un respaldo de la base de datos."""
         nonlocal folder_path
+        
+        # Prevenir ejecuciones múltiples usando AppState
+        if AppState.backup_in_progress:
+            logger.warning("Intento de ejecutar backup mientras otro está en progreso")
+            messagebox.showwarning("Advertencia", "Ya hay un respaldo en progreso.")
+            return
+        
         folder_path = folder
         
         if not folder_path:
@@ -804,6 +878,9 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             messagebox.showerror("Error", f"Error al verificar el directorio: {dir_error}")
             return
 
+        # Marcar que el backup está en progreso usando AppState
+        AppState.backup_in_progress = True
+        
         # Inicializar ConfigManager para usar sus métodos seguros
         config_manager = ConfigManager()
 
@@ -843,150 +920,151 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 progress_window.destroy()
                 return
 
-            server_type = server_data.get("server_type")
-            if server_type in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
-                try:
-                    # Actualizar el estado del programa de manera segura usando ConfigManager
-                    config_manager.update_program_state(
-                        running=True,
-                        status="in_progress",
-                        backup_dir=folder_path,
-                        progress=0
-                    )
+            # Verificar si hay servidores configurados en servers.json
+            enabled_servers = config_manager.get_enabled_servers()
+            
+            # Actualizar el estado del programa de manera segura usando ConfigManager
+            config_manager.update_program_state(
+                running=True,
+                status="in_progress",
+                backup_dir=folder_path,
+                progress=0
+            )
 
-                    # Lanzar el respaldo en un hilo separado
-                    def run_backup() -> None:
-                        try:
-                            # Crear instancia de BackupManager
-                            backup_manager = BackupManager()
-                            
-                            # Ejecutar respaldo según el tipo de servidor
-                            if server_type == "MySQL Server (TCP/IP)":
-                                result = backup_manager.backup_mysql_database(
-                                    server_data["password"], 
-                                    folder_path, 
-                                    server_data.get("client", "Cliente"), 
-                                    AppState.selected_amount,
-                                    server_data,
-                                    update_callback=update_progress
-                                )
-                            elif server_type == "SQL Server (Windows Authentication)":
-                                result = backup_manager.backup_sqlserver_database(
-                                    server_data,
-                                    folder_path,
-                                    server_data.get("client", "Cliente"),
-                                    AppState.selected_amount,
-                                    update_callback=update_progress
-                                )
-                            else:
-                                result = False
-                            
-                            # Actualizar al completar en el hilo principal
-                            progress_window.after(0, lambda: completion_tasks(result))
-                        except Exception as e:
-                            # Manejar errores en el hilo principal
-                            progress_window.after(0, lambda: handle_error(e))
+            # Definir funciones de completado y manejo de errores
+            def completion_tasks(result=True) -> None:
+                if not result:
+                    handle_error(Exception("El proceso de respaldo falló."))
+                    return
                     
-                    def completion_tasks(result=True) -> None:
-                        if not result:
-                            handle_error(Exception("El proceso de respaldo falló."))
-                            return
-                            
-                        update_progress(100, "Respaldo completado.")
+                update_progress(100, "Respaldo completado.")
+                
+                # Liberar flag de backup en progreso usando AppState
+                AppState.backup_in_progress = False
+                
+                # Actualizar estado de manera segura
+                config_manager.update_program_state(
+                    status="completed",
+                    client=server_data.get("client", "Cliente"),
+                    backup_dir=folder_path,
+                    amount=AppState.selected_amount,
+                    timestamp=datetime.datetime.now().isoformat(),
+                    progress=100
+                )
+                
+                if progress_window.winfo_exists():
+                    progress_window.destroy()
+                
+                messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                
+                # Configurar programación si se solicitó
+                if backup_hours or backup_minutes:
+                    # Programar respaldo con ConfigManager
+                    config_manager.set_backup_schedule(
+                        hours=backup_hours if backup_hours is not None else 4,
+                        minutes=backup_minutes if backup_minutes is not None else 0,
+                        enabled=True
+                    )
+                    
+                    # Forzar guardado completo para asegurar que todos los campos están presentes
+                    config_manager.force_save_all()
+                    
+                    ocultar_ventana()
+                    
+                    # Actualizar etiqueta de programación
+                    schedule_label.configure(
+                        text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
+                    )
+                    
+                    # Iniciar hilo de programación
+                    if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+                        AppState.scheduled_backup_thread = threading.Thread(
+                            target=run_scheduler, 
+                            daemon=True
+                        )
+                        AppState.scheduled_backup_thread.start()
                         
-                        # Actualizar estado de manera segura
-                        config_manager.update_program_state(
-                            status="completed",
-                            client=server_data.get("client", "Cliente"),
-                            backup_dir=folder_path,
-                            amount=AppState.selected_amount,
-                            timestamp=datetime.datetime.now().isoformat(),
-                            progress=100
+                    messagebox.showinfo(
+                        "Info", 
+                        f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
+                    )
+                else:
+                    messagebox.showinfo("Info", "Respaldo automático no programado.")
+            
+            def handle_error(e: Exception) -> None:
+                # Liberar flag de backup en progreso usando AppState
+                AppState.backup_in_progress = False
+                
+                config_manager.update_program_state(
+                    status="error",
+                    progress=0
+                )
+                
+                if progress_window.winfo_exists():
+                    progress_window.destroy()
+                
+                logger.error(f"Error en el respaldo: {e}", exc_info=True)
+                messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
+
+            # Definir función de respaldo según modo
+            if enabled_servers:
+                # Modo Multi-Servidor: usar backup_all_servers()
+                def run_backup() -> None:
+                    try:
+                        # Crear instancia de BackupManager
+                        backup_manager = BackupManager()
+                        
+                        # El log se genera en backup_manager.backup_all_servers()
+                        
+                        # Wrapper para actualizar progreso en el hilo principal de manera segura
+                        def safe_update_progress(value: int, text: str) -> None:
+                            try:
+                                if progress_window.winfo_exists():
+                                    # Llamar directamente sin lambda para evitar bucles
+                                    def do_update():
+                                        update_progress(value, text)
+                                    progress_window.after(0, do_update)
+                            except Exception as e:
+                                logger.warning(f"Error actualizando progreso: {e}")
+                        
+                        results = backup_manager.backup_all_servers(
+                            folder_path,
+                            AppState.selected_amount,
+                            update_callback=safe_update_progress
                         )
                         
-                        if progress_window.winfo_exists():
-                            progress_window.destroy()
+                        # Verificar resultados
+                        successful = sum(1 for v in results.values() if v)
+                        total = len(results)
+                        result = successful > 0  # True si al menos uno fue exitoso
                         
-                        messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
+                        # El log de completado ya se genera en backup_manager.backup_all_servers()
                         
-                        # Configurar programación si se solicitó
-                        if backup_hours or backup_minutes:
-                            # Programar respaldo con ConfigManager
-                            config_manager.set_backup_schedule(
-                                hours=backup_hours if backup_hours is not None else 4,
-                                minutes=backup_minutes if backup_minutes is not None else 0,
-                                enabled=True
+                        # Actualizar al completar en el hilo principal
+                        progress_window.after(0, lambda: completion_tasks(result))
+                            
+                    except Exception as e:
+                        # Manejar errores en el hilo principal
+                        progress_window.after(0, lambda: handle_error(e))
+            else:
+                # Modo Legado: usar server_data tradicional (compatibilidad hacia atrás)
+                def run_backup() -> None:
+                    try:
+                        # Crear instancia de BackupManager
+                        backup_manager = BackupManager()
+                        
+                        server_type = server_data.get("server_type")
+                        # Ejecutar respaldo según el tipo de servidor
+                        if server_type == "MySQL Server (TCP/IP)":
+                            result = backup_manager.backup_mysql_database(
+                                server_data["password"], 
+                                folder_path, 
+                                server_data.get("client", "Cliente"), 
+                                AppState.selected_amount,
+                                server_data,
+                                update_callback=update_progress
                             )
-                            
-                            # Forzar guardado completo para asegurar que todos los campos están presentes
-                            config_manager.force_save_all()
-                            
-                            ocultar_ventana()
-                            
-                            # Actualizar etiqueta de programación
-                            schedule_label.configure(
-                                text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
-                            )
-                            
-                            # Iniciar hilo de programación
-                            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
-                                AppState.scheduled_backup_thread = threading.Thread(
-                                    target=run_scheduler, 
-                                    daemon=True
-                                )
-                                AppState.scheduled_backup_thread.start()
-                                
-                            messagebox.showinfo(
-                                "Info", 
-                                f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
-                            )
-                        else:
-                            messagebox.showinfo("Info", "Respaldo automático no programado.")
-                    
-                    def handle_error(e: Exception) -> None:
-                        config_manager.update_program_state(
-                            status="error",
-                            progress=0
-                        )
-                        
-                        if progress_window.winfo_exists():
-                            progress_window.destroy()
-                        
-                        logger.error(f"Error en el respaldo: {e}", exc_info=True)
-                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-                    
-                    # Iniciar el proceso de respaldo en un hilo separado
-                    backup_thread = threading.Thread(target=run_backup, daemon=True)
-                    backup_thread.start()
-                    
-                except Exception as e:
-                    config_manager.update_program_state(
-                        status="error",
-                        progress=0
-                    )
-                    
-                    if progress_window.winfo_exists():
-                        progress_window.destroy()
-                    
-                    logger.error(f"Error al iniciar el respaldo: {e}", exc_info=True)
-                    messagebox.showerror("Error", f"Error al iniciar el respaldo: {e}")
-            elif server_type == "SQL Server (Windows Authentication)":
-                try:
-                    # Actualizar el estado del programa de manera segura usando ConfigManager
-                    config_manager.update_program_state(
-                        running=True,
-                        status="in_progress",
-                        backup_dir=folder_path,
-                        progress=0
-                    )
-
-                    # Lanzar el respaldo en un hilo separado
-                    def run_backup() -> None:
-                        try:
-                            # Crear instancia de BackupManager
-                            backup_manager = BackupManager()
-                            
-                            # Ejecutar respaldo para SQL Server
+                        elif server_type == "SQL Server (Windows Authentication)":
                             result = backup_manager.backup_sqlserver_database(
                                 server_data,
                                 folder_path,
@@ -994,101 +1072,22 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                                 AppState.selected_amount,
                                 update_callback=update_progress
                             )
-                            
-                            # Actualizar al completar en el hilo principal
-                            progress_window.after(0, lambda: completion_tasks(result))
-                        except Exception as e:
-                            # Manejar errores en el hilo principal
-                            progress_window.after(0, lambda: handle_error(e))
-                    
-                    def completion_tasks(result=True) -> None:
-                        if not result:
-                            handle_error(Exception("El proceso de respaldo falló."))
-                            return
-                            
-                        update_progress(100, "Respaldo completado.")
-                        
-                        # Actualizar estado de manera segura
-                        config_manager.update_program_state(
-                            status="completed",
-                            client=server_data.get("client", "Cliente"),
-                            backup_dir=folder_path,
-                            amount=AppState.selected_amount,
-                            timestamp=datetime.datetime.now().isoformat(),
-                            progress=100
-                        )
-                        
-                        if progress_window.winfo_exists():
-                            progress_window.destroy()
-                        
-                        messagebox.showinfo("Éxito", "Respaldo completado con éxito.")
-                        
-                        # Configurar programación si se solicitó
-                        if backup_hours or backup_minutes:
-                            # Programar respaldo con ConfigManager
-                            config_manager.set_backup_schedule(
-                                hours=backup_hours if backup_hours is not None else 4,
-                                minutes=backup_minutes if backup_minutes is not None else 0,
-                                enabled=True
-                            )
-                            
-                            # Forzar guardado completo para asegurar que todos los campos están presentes
-                            config_manager.force_save_all()
-                            
-                            ocultar_ventana()
-                            
-                            # Actualizar etiqueta de programación
-                            schedule_label.configure(
-                                text=f"Programado: cada {backup_hours}h:{backup_minutes}m"
-                            )
-                            
-                            # Iniciar hilo de programación
-                            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
-                                AppState.scheduled_backup_thread = threading.Thread(
-                                    target=run_scheduler, 
-                                    daemon=True
-                                )
-                                AppState.scheduled_backup_thread.start()
-                                
-                            messagebox.showinfo(
-                                "Info", 
-                                f"Respaldo automático programado cada {backup_hours} horas y {backup_minutes} minutos."
-                            )
                         else:
-                            messagebox.showinfo("Info", "Respaldo automático no programado.")
-                    
-                    def handle_error(e: Exception) -> None:
-                        config_manager.update_program_state(
-                            status="error",
-                            progress=0
-                        )
+                            result = False
                         
-                        if progress_window.winfo_exists():
-                            progress_window.destroy()
-                        
-                        logger.error(f"Error en el respaldo: {e}", exc_info=True)
-                        messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
-                    
-                    # Iniciar el proceso de respaldo en un hilo separado
-                    backup_thread = threading.Thread(target=run_backup, daemon=True)
-                    backup_thread.start()
-                    
-                except Exception as e:
-                    config_manager.update_program_state(
-                        status="error",
-                        progress=0
-                    )
-                    
-                    if progress_window.winfo_exists():
-                        progress_window.destroy()
-                    
-                    logger.error(f"Error al iniciar el respaldo SQL Server: {e}", exc_info=True)
-                    messagebox.showerror("Error", f"Error al iniciar el respaldo SQL Server: {e}")
-            else:
-                if progress_window.winfo_exists():
-                    progress_window.destroy()
-                messagebox.showerror("Error", "Tipo de servidor no soportado.")
+                        # Actualizar al completar en el hilo principal
+                        progress_window.after(0, lambda: completion_tasks(result))
+                    except Exception as e:
+                        # Manejar errores en el hilo principal
+                        progress_window.after(0, lambda: handle_error(e))
+            
+            # Iniciar el proceso de respaldo en un hilo separado
+            backup_thread = threading.Thread(target=run_backup, daemon=True)
+            backup_thread.start()
         except Exception as e:
+            # Liberar flag de backup en progreso usando AppState
+            AppState.backup_in_progress = False
+            
             try:
                 config_manager.update_program_state(
                     status="error",
