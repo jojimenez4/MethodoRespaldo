@@ -81,7 +81,7 @@ class AuthManager:
             "earancibia": {"password_hash": self._hash_password("Tg9g1Q4p"), "role": "admin"},
             "csegovia": {"password_hash": self._hash_password("e0N20jvZ"), "role": "admin"},
             "smellado": {"password_hash": self._hash_password("e9Oy1n7X"), "role": "admin"},
-            "agarcia": {"password_hash": self._hash_password("Vh33c0B2"), "role": "admin"},
+            "salcazar": {"password_hash": self._hash_password("Vh33c0B2"), "role": "admin"},
             "jjimenez": {"password_hash": self._hash_password("70HfLi46"), "role": "admin"},
             "erodriguez": {"password_hash": self._hash_password("93Glzeg4"), "role": "admin"},
             "rrodriguez": {"password_hash": self._hash_password("D71q2As9"), "role": "admin"},

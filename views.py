@@ -376,7 +376,9 @@ def create_server_interface() -> None:
             
             # Procesar según tipo de servidor
             if server_type_selected == "MySQL Server (TCP/IP)":
-                client, connection_success = bd_connect_mysql(host, port, encrypted_password)
+                # Convertir encrypted_password de bytes a str para la función de conexión
+                password_str: str = encrypted_password.decode('latin-1') if isinstance(encrypted_password, bytes) else str(encrypted_password)
+                client, connection_success = bd_connect_mysql(host, port, password_str)
                 
                 if connection_success:
                     # Guardar configuración de conexión
@@ -417,7 +419,9 @@ def create_server_interface() -> None:
                 
                 # Verificar conexión con la primera base de datos
                 first_database = databases[0]
-                client, connection_success = bd_connect_sqlserver(host, username, encrypted_password, first_database)
+                # Convertir encrypted_password de bytes a str para la función de conexión
+                password_str: str = encrypted_password.decode('latin-1') if isinstance(encrypted_password, bytes) else str(encrypted_password)
+                client, connection_success = bd_connect_sqlserver(host, username, password_str, first_database)
                 
                 if connection_success:
                     # Inicializar ConfigManager

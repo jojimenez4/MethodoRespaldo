@@ -169,32 +169,37 @@ def start_scheduled_backups():
             logger.info(f"Usando directorio de respaldo alternativo: {backup_dir}")
             config_manager.update_program_state(backup_dir=backup_dir)
         
-        # Verificar datos del servidor
-        server_data = config_manager.get_server_data()
-        if not server_data:
-            logger.error("No hay datos de servidor configurados")
+        # Verificar si hay servidores configurados (soporte multi-servidor)
+        enabled_servers = config_manager.get_enabled_servers()
+        
+        if not enabled_servers:
+            logger.warning("No hay servidores habilitados configurados")
+            # Intentar migración desde formato antiguo (server.json)
+            server_data = config_manager.get_server_data()
+            if server_data:
+                logger.info("Migrando desde configuración de servidor único")
+                # La migración se hace automáticamente en get_servers()
+                enabled_servers = config_manager.get_enabled_servers()
+                if not enabled_servers:
+                    logger.error("No se pudo migrar la configuración de servidor")
+                    return False
+            else:
+                logger.error("No hay configuración de servidores disponible")
+                return False
+        
+        # Validar que al menos un servidor tenga configuración válida
+        valid_servers = 0
+        for server in enabled_servers:
+            server_type = server.get("server_type")
+            if server_type in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
+                if server.get("password") and server.get("client"):
+                    valid_servers += 1
+        
+        if valid_servers == 0:
+            logger.error("No hay servidores con configuración válida")
             return False
         
-        # Validar tipo de servidor
-        server_type = server_data.get("server_type")
-        if not server_type:
-            logger.error("Tipo de servidor no especificado en la configuración")
-            return False
-        
-        logger.info(f"Servicio configurado para tipo de servidor: {server_type}")
-        
-        if server_type not in ["MySQL Server (TCP/IP)", "SQL Server (Windows Authentication)"]:
-            logger.error(f"Tipo de servidor no soportado: {server_type}")
-            return False
-            
-        if not server_data.get("password"):
-            logger.error("Contraseña de servidor no configurada")
-            return False
-            
-        if not server_data.get("client"):
-            logger.warning("Nombre de cliente no configurado")
-            server_data["client"] = "Cliente_Predeterminado"
-            config_manager.update_server_data(client="Cliente_Predeterminado")
+        logger.info(f"Servicio configurado con {len(enabled_servers)} servidor(es) habilitado(s), {valid_servers} válido(s)")
         
         # Configurar programador con comprobación previa
         from backup_manager import BackupManager
@@ -205,20 +210,17 @@ def start_scheduled_backups():
             # Recargar configuración cada vez
             try:
                 current_state = config_manager.get_program_state()
-                current_server_data = config_manager.get_server_data()
+                current_enabled_servers = config_manager.get_enabled_servers()
                 
-                # Verificar si hay datos suficientes para el respaldo
-                if not current_server_data.get("password") or not current_server_data.get("client"):
-                    logger.warning("Datos de servidor insuficientes para ejecutar respaldo")
+                # Verificar si hay servidores habilitados
+                if not current_enabled_servers:
+                    logger.warning("No hay servidores habilitados para ejecutar respaldo")
                     return False
                 
-                # Hacer copia local de los parámetros importantes para evitar referencias perdidas
+                # Hacer copia local de los parámetros importantes
                 try:
-                    password = current_server_data.get("password", "")
                     backup_directory = current_state.get("backup_dir", backup_dir)
-                    client_name = current_server_data.get("client", "Cliente")
                     amount_value = current_state.get("amount", 5)
-                    server_data_copy = current_server_data.copy()
                     
                     # Verificar que el directorio existe y se puede escribir
                     try:
@@ -234,8 +236,7 @@ def start_scheduled_backups():
                         return False
                     
                     # Registrar inicio de respaldo
-                    server_type = server_data_copy.get("server_type", "Desconocido")
-                    logger.info(f"Iniciando respaldo programado para {client_name} ({server_type}) en {backup_directory}")
+                    logger.info(f"Iniciando respaldo programado de {len(current_enabled_servers)} servidor(es) en {backup_directory}")
                     
                     # Actualizar estado antes de ejecutar
                     config_manager.update_program_state(
@@ -516,27 +517,33 @@ def initialize_app():
     try:
         # Detectar modo servicio PRIMERO (antes de cualquier inicialización costosa)
         def is_running_as_service():
-            """Detecta si el proceso está siendo ejecutado como servicio de Windows"""
-            # Verificar proceso padre (método más confiable)
-            if PSUTIL_AVAILABLE:
-                try:
-                    import psutil as ps
-                    parent = ps.Process().parent()
-                    if parent:
-                        parent_name = parent.name().lower()
-                        # Si el padre es services.exe → definitivamente es servicio
-                        if parent_name == 'services.exe':
-                            return True
-                        # Si el padre es explorer.exe o similar → es GUI (usuario hizo doble clic)
-                        if parent_name in ['explorer.exe', 'cmd.exe', 'powershell.exe']:
-                            return False
-                except:
-                    pass
-            
-            # Si no podemos determinar, usar heurística conservadora
-            # SOLO considerar servicio si NO es interactivo
-            # En modo GUI (doble clic), siempre habrá un proceso padre visible
-            return False
+            """
+            Detecta si el proceso está siendo ejecutado como servicio de Windows.
+            Solo retorna True si el padre es definitivamente services.exe
+            """
+            if not PSUTIL_AVAILABLE:
+                return False
+                
+            try:
+                import psutil
+                parent = psutil.Process().parent()
+                
+                if not parent:
+                    # Si no hay padre, asumir que NO es servicio (puede ser proceso huérfano)
+                    return False
+                    
+                parent_name = parent.name().lower()
+                
+                # SOLO si el padre es services.exe, es definitivamente un servicio
+                if 'services.exe' in parent_name:
+                    return True
+                    
+                # En cualquier otro caso, NO es servicio
+                return False
+                
+            except Exception:
+                # En caso de error, asumir que NO es un servicio
+                return False
         
         # Si se detecta --native-service O si está siendo ejecutado por services.exe
         is_service_call = '--native-service' in sys.argv or is_running_as_service()
@@ -593,6 +600,8 @@ def initialize_app():
                     return 0
                 
             except ImportError as e:
+                setup_logging()
+                ensure_app_directories()
                 logger.error(f"Error importando windows_service: {e}")
                 logger.info("Cambiando a modo servicio legacy...")
                 return run_as_service()

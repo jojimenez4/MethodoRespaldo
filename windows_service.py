@@ -98,7 +98,7 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
                 import os
                 from pathlib import Path
                 
-                # Asegurar directorios
+                # Asegurar directorios ANTES de configurar logging
                 if getattr(sys, 'frozen', False):
                     app_dir = Path(sys.executable).parent
                 else:
@@ -108,7 +108,22 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
                     dir_path = app_dir / directory
                     dir_path.mkdir(exist_ok=True)
                 
+                # Reconfigurar logger para asegurar que funciona
+                service_log = app_dir / "logs" / "windows_service.log"
+                
+                # Limpiar handlers existentes
+                logger.handlers.clear()
+                
+                # Crear nuevo handler con la ruta correcta
+                handler = logging.FileHandler(service_log, encoding='utf-8')
+                handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+                logger.addHandler(handler)
+                logger.setLevel(logging.INFO)
+                logger.propagate = False
+                
                 logger.info(f"Servicio MethodoRespaldo v2.0 iniciado - {self.app_dir}")
+                logger.info(f"Directorio de trabajo: {os.getcwd()}")
+                logger.info(f"Directorio del ejecutable: {app_dir}")
                 
                 # Reportar al SCM que estamos iniciando
                 servicemanager.LogMsg(
@@ -117,11 +132,16 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
                     (self._svc_name_, '')
                 )
                 
+                logger.info("Reportado al Service Control Manager")
+                
                 # Marcar como en ejecución
                 self.running = True
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
                 
+                logger.info("Estado cambiado a SERVICE_RUNNING")
+                
                 # Ejecutar la lógica principal del servicio
+                logger.info("Iniciando loop principal del servicio")
                 self._run_service_loop()
                 
             except Exception as e:
@@ -135,31 +155,44 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
             Importa y ejecuta la lógica de respaldo
             """
             try:
+                logger.info("Iniciando importación de módulos...")
+                
                 # Importar módulos necesarios (lazy import para evitar problemas de inicialización)
                 from backup_manager import BackupManager
                 from config_manager import ConfigManager
                 import schedule
                 
+                logger.info("Módulos importados correctamente")
+                
                 # Inicializar managers
+                logger.info("Inicializando ConfigManager...")
                 config_manager = ConfigManager()
+                
+                logger.info("Inicializando BackupManager...")
                 backup_manager = BackupManager()
                 
+                logger.info("Managers inicializados correctamente")
+                
                 # Obtener configuración de programación
+                logger.info("Obteniendo configuración de programación...")
                 program_state = config_manager.get_program_state()
                 
                 if not program_state:
                     logger.warning("No se encontró configuración. Usando valores por defecto.")
-                    backup_hour = 4
-                    backup_minute = 0
+                    backup_hours = 24  # Por defecto cada 24 horas
                 else:
-                    backup_hour = program_state.get('backup_hours', 4)
-                    backup_minute = program_state.get('backup_minutes', 0)
+                    backup_hours = program_state.get('backup_hours', 24)
+                    logger.info(f"Configuración cargada: backup cada {backup_hours} hora(s)")
                 
-                # Programar backup diario
-                schedule_time = f"{backup_hour:02d}:{backup_minute:02d}"
-                schedule.every().day.at(schedule_time).do(self._execute_backup, backup_manager)
+                # Programar backup por intervalo de horas (como en modo GUI)
+                logger.info(f"Programando backup cada {backup_hours} hora(s)")
+                schedule.every(backup_hours).hours.do(self._execute_backup, backup_manager)
                 
-                logger.info(f"Backup programado: {schedule_time} diario")
+                logger.info(f"Backup programado: cada {backup_hours} hora(s)")
+                logger.info("Ejecutando primer backup inmediatamente...")
+                
+                # Ejecutar el primer backup inmediatamente al iniciar el servicio
+                self._execute_backup(backup_manager)
                 
                 # Loop principal
                 while self.running:
