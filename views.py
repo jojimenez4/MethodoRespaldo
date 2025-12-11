@@ -740,10 +740,25 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
 
     # Marco para selección de carpeta
     def update_label() -> Optional[str]:
-        """Actualiza la etiqueta con la carpeta seleccionada."""
+        """Actualiza la etiqueta con la carpeta seleccionada y guarda en status.json."""
+        nonlocal folder_path
         folder = filedialog.askdirectory()
         if folder:
             rounded_label.configure(text=folder)
+            folder_path = folder  # Actualizar variable local
+            
+            # Guardar inmediatamente en status.json
+            try:
+                from config_manager import ConfigManager
+                config_manager = ConfigManager()
+                config_manager.update_program_state(backup_dir=folder)
+                logger.info(f"Directorio de backup guardado: {folder}")
+            except Exception as e:
+                logger.error(f"Error guardando directorio de backup: {e}")
+                # Fallback: guardar directamente en program_state
+                program_state["backup_dir"] = folder
+                save_state(STATUS_PROGRAM, program_state)
+            
             return folder
         else:
             messagebox.showerror("Error", "No se seleccionó ninguna carpeta.")
@@ -1378,9 +1393,10 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
         if AppState.app_icon:
             AppState.app_icon.stop()
             
-        # Guardar estado actual
+        # Guardar estado actual (NO modificar scheduled para que el servicio lo mantenga)
         program_state["running"] = False
         program_state["status"] = "stopped"
+        # NOTA: No modificamos program_state["scheduled"] para preservar la configuración del usuario
         save_state(STATUS_PROGRAM, program_state)
         
         root.destroy()
@@ -1710,13 +1726,14 @@ def create_system_tray_icon() -> None:
     
     def exit_app(icon, item) -> None:
         """Cierra la aplicación desde la bandeja del sistema."""
-        # Guardar estado antes de cerrar
+        # Guardar estado antes de cerrar (NO modificar scheduled para que el servicio lo mantenga)
         if program_state:
             program_state["running"] = False
             program_state["status"] = "stopped"
+            # NOTA: No modificamos program_state["scheduled"] para preservar la configuración del usuario
             save_state(STATUS_PROGRAM, program_state)
         
-        # Detener programador y threads
+        # Detener programador y threads (solo en memoria, no en archivo)
         AppState.running = False
         AppState.scheduled = False
         

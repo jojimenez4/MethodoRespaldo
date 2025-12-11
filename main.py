@@ -286,7 +286,10 @@ def start_scheduled_backups():
                 return False
         
         # Programar respaldo con la función segura
+        # IMPORTANTE: Si el servicio está corriendo, SIEMPRE activar la programación
+        # Los valores de backup_hours y backup_minutes ya fueron leídos del archivo
         if scheduled:
+            # Usar los valores configurados por el usuario
             backup_manager.scheduler.schedule_backup(
                 backup_hours,
                 backup_minutes,
@@ -294,16 +297,28 @@ def start_scheduled_backups():
             )
             logger.info(f"Respaldos programados iniciados: cada {backup_hours}h:{backup_minutes}m")
         else:
-            # Si no hay programación activa, configurar una predeterminada
-            logger.info("No hay respaldo programado configurado, estableciendo respaldo cada 4 horas")
-            config_manager.set_backup_schedule(4, 0, True)
+            # Si scheduled es False pero hay valores configurados (no son los defaults),
+            # usarlos en lugar de resetear a 4 horas
+            has_custom_schedule = (backup_hours != 4 or backup_minutes != 0)
+            
+            if has_custom_schedule:
+                # El usuario configuró valores personalizados, usarlos
+                logger.info(f"Activando respaldo con configuración existente: {backup_hours}h:{backup_minutes}m")
+                config_manager.set_backup_schedule(backup_hours, backup_minutes, True)
+                backup_manager.scheduler.schedule_backup(
+                    backup_hours,
+                    backup_minutes,
+                    execute_backup_safely
+                )
+            else:
+                # Sin configuración personalizada, usar valores por defecto
+                logger.info("No hay respaldo programado configurado, estableciendo respaldo cada 4 horas")
+                config_manager.set_backup_schedule(4, 0, True)
+                backup_manager.scheduler.schedule_backup(4, 0, execute_backup_safely)
             
             # Actualizar estado
             config_manager.force_save_all()
-            
-            # Programar con valores predeterminados
-            backup_manager.scheduler.schedule_backup(4, 0, execute_backup_safely)
-            logger.info("Respaldos programados iniciados con configuración predeterminada: cada 4h:0m")
+            logger.info(f"Respaldos programados iniciados: cada {backup_hours}h:{backup_minutes}m")
         
         # Verificar que el scheduler está en funcionamiento
         if not backup_manager.scheduler.is_scheduled():
@@ -519,40 +534,78 @@ def initialize_app():
         def is_running_as_service():
             """
             Detecta si el proceso está siendo ejecutado como servicio de Windows.
-            Solo retorna True si el padre es definitivamente services.exe
+            Usa múltiples métodos para mayor fiabilidad.
             """
-            if not PSUTIL_AVAILABLE:
-                return False
-                
+            parent_info = "N/A"
+            session_id = -1
+            is_interactive = True
+            
+            # Método 1: Obtener Session ID - servicios corren en sesión 0
             try:
-                import psutil
-                parent = psutil.Process().parent()
-                
-                if not parent:
-                    # Si no hay padre, asumir que NO es servicio (puede ser proceso huérfano)
-                    return False
+                import ctypes
+                pid = os.getpid()
+                session = ctypes.c_ulong()
+                if ctypes.windll.kernel32.ProcessIdToSessionId(pid, ctypes.byref(session)):
+                    session_id = session.value
+            except:
+                session_id = -1
+            
+            # Método 2: Verificar si el proceso tiene una estación de ventanas interactiva
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                # GetProcessWindowStation retorna NULL para servicios sin estación
+                hwinsta = user32.GetProcessWindowStation()
+                is_interactive = hwinsta != 0
+            except:
+                is_interactive = True
+            
+            # Método 3: Verificar proceso padre/abuelo
+            if PSUTIL_AVAILABLE:
+                try:
+                    import psutil
+                    current = psutil.Process()
+                    parent = current.parent()
                     
-                parent_name = parent.name().lower()
+                    if parent:
+                        parent_name = parent.name().lower()
+                        grandparent = parent.parent()
+                        grandparent_name = grandparent.name().lower() if grandparent else "N/A"
+                        parent_info = f"{parent_name} -> {grandparent_name}"
+                        
+                        # Si el abuelo es services.exe, es servicio
+                        if 'services.exe' in grandparent_name:
+                            return True, parent_info, session_id
+                except:
+                    pass
+            
+            # Decisión final: Es servicio si sesión 0 Y no hay argumentos de comando
+            # Los comandos install/remove/start/stop siempre tienen argumentos
+            if session_id == 0 and len(sys.argv) == 1:
+                return True, f"{parent_info} (sesión 0, sin args)", session_id
                 
-                # SOLO si el padre es services.exe, es definitivamente un servicio
-                if 'services.exe' in parent_name:
-                    return True
-                    
-                # En cualquier otro caso, NO es servicio
-                return False
-                
-            except Exception:
-                # En caso de error, asumir que NO es un servicio
-                return False
+            return False, parent_info, session_id
         
-        # Si se detecta --native-service O si está siendo ejecutado por services.exe
-        is_service_call = '--native-service' in sys.argv or is_running_as_service()
+        # Verificar argumentos de línea de comandos para comandos de servicio
+        # El formato correcto es: --native-service install/remove/start/stop
+        service_commands = ['install', 'remove', 'start', 'stop', 'restart', 'debug', 'update']
+        has_native_service_flag = '--native-service' in sys.argv
+        has_service_command = any(arg.lower() in service_commands for arg in sys.argv[1:])
+        
+        # Si se detecta --native-service O si está siendo ejecutado como servicio (sesión 0)
+        is_service_result, parent_info, session_id = is_running_as_service()
+        is_service_call = has_native_service_flag or is_service_result or (has_service_command and len(sys.argv) == 2)
         
         # DEBUG: Escribir a archivo para diagnóstico (sin logging configurado aún)
         try:
             with open(os.path.join(APP_DIR, "logs", "service_debug.txt"), "a") as f:
                 f.write(f"\n{datetime.datetime.now()}: sys.argv = {sys.argv}\n")
                 f.write(f"is_service_call = {is_service_call}\n")
+                f.write(f"is_service_result = {is_service_result}\n")
+                f.write(f"has_native_service_flag = {has_native_service_flag}\n")
+                f.write(f"has_service_command = {has_service_command}\n")
+                f.write(f"parent_info = {parent_info}\n")
+                f.write(f"session_id = {session_id}\n")
                 f.write(f"len(sys.argv) = {len(sys.argv)}\n")
         except:
             pass

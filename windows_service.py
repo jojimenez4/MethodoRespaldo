@@ -179,16 +179,26 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
                 
                 if not program_state:
                     logger.warning("No se encontró configuración. Usando valores por defecto.")
-                    backup_hours = 24  # Por defecto cada 24 horas
+                    backup_hours = 4  # Por defecto cada 4 horas
+                    backup_minutes = 0
                 else:
-                    backup_hours = program_state.get('backup_hours', 24)
-                    logger.info(f"Configuración cargada: backup cada {backup_hours} hora(s)")
+                    backup_hours = program_state.get('backup_hours', 4)
+                    backup_minutes = program_state.get('backup_minutes', 0)
+                    logger.info(f"Configuración cargada: backup cada {backup_hours}h:{backup_minutes}m")
                 
-                # Programar backup por intervalo de horas (como en modo GUI)
-                logger.info(f"Programando backup cada {backup_hours} hora(s)")
-                schedule.every(backup_hours).hours.do(self._execute_backup, backup_manager)
+                # Calcular intervalo total en minutos
+                total_minutes = (backup_hours * 60) + backup_minutes
                 
-                logger.info(f"Backup programado: cada {backup_hours} hora(s)")
+                # Asegurar un mínimo de 1 minuto
+                if total_minutes < 1:
+                    logger.warning(f"Intervalo muy pequeño ({total_minutes}m), usando mínimo de 1 minuto")
+                    total_minutes = 1
+                
+                # Programar backup por intervalo en minutos para mayor precisión
+                logger.info(f"Programando backup cada {total_minutes} minuto(s) ({backup_hours}h:{backup_minutes}m)")
+                schedule.every(total_minutes).minutes.do(self._execute_backup, backup_manager)
+                
+                logger.info(f"Backup programado: cada {backup_hours}h:{backup_minutes}m ({total_minutes} minutos)")
                 logger.info("Ejecutando primer backup inmediatamente...")
                 
                 # Ejecutar el primer backup inmediatamente al iniciar el servicio
