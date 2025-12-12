@@ -174,31 +174,58 @@ if PYWIN32_AVAILABLE and win32serviceutil is not None:
                 logger.info("Managers inicializados correctamente")
                 
                 # Obtener configuración de programación
-                logger.info("Obteniendo configuración de programación...")
-                program_state = config_manager.get_program_state()
+                logger.info("Obteniendo configuración de tareas programadas...")
                 
-                if not program_state:
-                    logger.warning("No se encontró configuración. Usando valores por defecto.")
-                    backup_hours = 4  # Por defecto cada 4 horas
-                    backup_minutes = 0
+                # Obtener tareas del nuevo sistema
+                backup_tasks = config_manager.get_backup_tasks()
+                
+                if backup_tasks:
+                    logger.info(f"Se encontraron {len(backup_tasks)} tarea(s) configurada(s)")
+                    
+                    # Programar cada tarea
+                    for idx, task in enumerate(backup_tasks, 1):
+                        if not task.get("enabled", True):
+                            logger.info(f"Tarea {idx} deshabilitada, omitiendo")
+                            continue
+                        
+                        task_type = task.get("type")
+                        
+                        if task_type == "frequency":
+                            # Tarea de frecuencia: ejecutar cada X tiempo
+                            hours = task.get("hours", 0)
+                            minutes = task.get("minutes", 0)
+                            total_minutes = (hours * 60) + minutes
+                            
+                            if total_minutes < 1:
+                                logger.warning(f"Tarea {idx}: intervalo muy pequeño, usando 1 minuto")
+                                total_minutes = 1
+                            
+                            schedule.every(total_minutes).minutes.do(self._execute_backup, backup_manager)
+                            logger.info(f"Tarea {idx} (frecuencia): cada {hours}h:{minutes}m ({total_minutes} minutos)")
+                            
+                        elif task_type == "fixed_time":
+                            # Tarea de hora fija: ejecutar a una hora específica del día
+                            hour = task.get("hour", 0)
+                            minute = task.get("minute", 0)
+                            time_str = f"{str(hour).zfill(2)}:{str(minute).zfill(2)}"
+                            
+                            schedule.every().day.at(time_str).do(self._execute_backup, backup_manager)
+                            logger.info(f"Tarea {idx} (hora fija): a las {time_str}")
+                        else:
+                            logger.warning(f"Tarea {idx}: tipo desconocido '{task_type}'")
                 else:
-                    backup_hours = program_state.get('backup_hours', 4)
-                    backup_minutes = program_state.get('backup_minutes', 0)
-                    logger.info(f"Configuración cargada: backup cada {backup_hours}h:{backup_minutes}m")
+                    # Sin tareas configuradas, crear una por defecto (cada 4 horas)
+                    logger.info("No hay tareas configuradas, creando tarea por defecto: cada 4 horas")
+                    schedule.every(240).minutes.do(self._execute_backup, backup_manager)
+                    
+                    # Guardar la tarea por defecto
+                    config_manager.set_backup_tasks([{
+                        "type": "frequency",
+                        "hours": 4,
+                        "minutes": 0,
+                        "enabled": True
+                    }])
                 
-                # Calcular intervalo total en minutos
-                total_minutes = (backup_hours * 60) + backup_minutes
-                
-                # Asegurar un mínimo de 1 minuto
-                if total_minutes < 1:
-                    logger.warning(f"Intervalo muy pequeño ({total_minutes}m), usando mínimo de 1 minuto")
-                    total_minutes = 1
-                
-                # Programar backup por intervalo en minutos para mayor precisión
-                logger.info(f"Programando backup cada {total_minutes} minuto(s) ({backup_hours}h:{backup_minutes}m)")
-                schedule.every(total_minutes).minutes.do(self._execute_backup, backup_manager)
-                
-                logger.info(f"Backup programado: cada {backup_hours}h:{backup_minutes}m ({total_minutes} minutos)")
                 logger.info("Ejecutando primer backup inmediatamente...")
                 
                 # Ejecutar el primer backup inmediatamente al iniciar el servicio

@@ -148,10 +148,9 @@ class ConfigManager:
             "amount": 5,              # Valor predeterminado
             "progress": 0,
             "status": "idle",
-            "version": "1.0",
-            "backup_hours": 4,         # Respaldo cada 4 horas por defecto
-            "backup_minutes": 0,
-            "scheduled": False         # Indica si el respaldo está programado
+            "version": "2.0",
+            "scheduled": False,        # Indica si el respaldo está programado
+            "backup_tasks": []         # Lista de tareas programadas
         }
     
     def _ensure_complete_state(self) -> None:
@@ -488,7 +487,7 @@ class ConfigManager:
     
     def set_backup_schedule(self, hours: int, minutes: int, enabled: bool = True) -> bool:
         """
-        Configura la programación de respaldos.
+        Configura la programación de respaldos creando una tarea de frecuencia.
         
         Args:
             hours: Horas entre respaldos
@@ -499,11 +498,145 @@ class ConfigManager:
             True si la configuración fue exitosa, False en caso contrario
         """
         logger.debug(f"Configurando respaldo programado: {hours}h:{minutes}m (enabled={enabled})")
+        
+        # Crear tarea de frecuencia
+        task = {
+            "type": "frequency",
+            "hours": hours,
+            "minutes": minutes,
+            "enabled": enabled
+        }
+        
+        # Reemplazar todas las tareas con esta única tarea
+        return self.set_backup_tasks([task])
+    
+    # ========== MÉTODOS PARA SISTEMA DE TAREAS ==========
+    
+    def get_backup_tasks(self) -> list:
+        """
+        Obtiene la lista de tareas de respaldo configuradas.
+        
+        Returns:
+            Lista de diccionarios con las tareas configuradas
+        """
+        tasks = self.program_state.get("backup_tasks", [])
+        
+        # Si no hay tareas, crear una por defecto
+        if not tasks and self.program_state.get("scheduled", False):
+            # Crear tarea de frecuencia por defecto
+            default_task = {
+                "type": "frequency",
+                "hours": 4,
+                "minutes": 0,
+                "enabled": True
+            }
+            tasks = [default_task]
+            logger.info("Creada tarea de frecuencia por defecto: 4h:0m")
+        
+        return tasks
+    
+    def set_backup_tasks(self, tasks: list) -> bool:
+        """
+        Establece la lista completa de tareas de respaldo.
+        
+        Args:
+            tasks: Lista de diccionarios con las tareas
+                   Cada tarea debe tener:
+                   - type: "frequency" o "fixed_time"
+                   - Para frequency: hours, minutes
+                   - Para fixed_time: hour, minute
+                   - enabled: True/False
+        
+        Returns:
+            True si se guardó correctamente, False en caso contrario
+        """
+        # Validar tareas
+        validated_tasks = []
+        for task in tasks[:3]:  # Máximo 3 tareas
+            if not isinstance(task, dict):
+                continue
+                
+            task_type = task.get("type")
+            if task_type == "frequency":
+                validated_task = {
+                    "type": "frequency",
+                    "hours": int(task.get("hours", 0)),
+                    "minutes": int(task.get("minutes", 0)),
+                    "enabled": bool(task.get("enabled", True))
+                }
+                # Validar que tenga al menos algún intervalo
+                if validated_task["hours"] > 0 or validated_task["minutes"] > 0:
+                    validated_tasks.append(validated_task)
+                    
+            elif task_type == "fixed_time":
+                validated_task = {
+                    "type": "fixed_time",
+                    "hour": int(task.get("hour", 0)) % 24,
+                    "minute": int(task.get("minute", 0)) % 60,
+                    "enabled": bool(task.get("enabled", True))
+                }
+                validated_tasks.append(validated_task)
+        
+        # Verificar si hay tareas habilitadas
+        has_enabled = any(t.get("enabled", True) for t in validated_tasks)
+        
+        logger.info(f"Guardando {len(validated_tasks)} tarea(s) de respaldo")
         return self.update_program_state(
-            backup_hours=hours,
-            backup_minutes=minutes,
-            scheduled=enabled
+            backup_tasks=validated_tasks,
+            scheduled=has_enabled and len(validated_tasks) > 0
         )
+    
+    def add_backup_task(self, task: dict) -> bool:
+        """
+        Añade una nueva tarea de respaldo.
+        
+        Args:
+            task: Diccionario con la configuración de la tarea
+        
+        Returns:
+            True si se añadió correctamente, False si ya hay 3 tareas
+        """
+        tasks = self.get_backup_tasks()
+        if len(tasks) >= 3:
+            logger.warning("No se puede añadir más tareas: límite de 3 alcanzado")
+            return False
+        
+        tasks.append(task)
+        return self.set_backup_tasks(tasks)
+    
+    def remove_backup_task(self, index: int) -> bool:
+        """
+        Elimina una tarea de respaldo por su índice.
+        
+        Args:
+            index: Índice de la tarea a eliminar (0-2)
+        
+        Returns:
+            True si se eliminó correctamente
+        """
+        tasks = self.get_backup_tasks()
+        if 0 <= index < len(tasks):
+            removed = tasks.pop(index)
+            logger.info(f"Tarea eliminada: {removed}")
+            return self.set_backup_tasks(tasks)
+        return False
+    
+    def toggle_backup_task(self, index: int, enabled: bool) -> bool:
+        """
+        Activa o desactiva una tarea de respaldo.
+        
+        Args:
+            index: Índice de la tarea
+            enabled: True para activar, False para desactivar
+        
+        Returns:
+            True si se actualizó correctamente
+        """
+        tasks = self.get_backup_tasks()
+        if 0 <= index < len(tasks):
+            tasks[index]["enabled"] = enabled
+            return self.set_backup_tasks(tasks)
+        return False
     
     def force_save_all(self) -> bool:
         """

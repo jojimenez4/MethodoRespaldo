@@ -122,32 +122,31 @@ def start_scheduled_backups():
         config_manager = ConfigManager()
         program_state = config_manager.get_program_state()
         
-        # Verificar si hay respaldo programado
-        scheduled = program_state.get("scheduled", False)
-        logger.info(f"Estado de programación al iniciar: {scheduled}")
+        # Obtener tareas del nuevo sistema
+        backup_tasks = config_manager.get_backup_tasks()
         
-        # Obtener parámetros de programación
-        backup_hours = program_state.get("backup_hours", 4)
-        backup_minutes = program_state.get("backup_minutes", 0)
+        # Verificar si hay respaldo programado (legacy o nuevo sistema)
+        scheduled = program_state.get("scheduled", False)
+        has_tasks = len(backup_tasks) > 0
+        
+        logger.info(f"Estado de programación: scheduled={scheduled}, tareas={len(backup_tasks)}")
+        
+        # Obtener directorio de respaldo
         backup_dir = program_state.get("backup_dir")
         
-        # Verificar que hay un directorio de respaldo (esto es lo único realmente necesario)
+        # Verificar que hay un directorio de respaldo
         if not backup_dir:
             logger.warning("No hay directorio de respaldo configurado")
-            # Usar directorio predeterminado
             backup_dir = os.path.join(APP_DIR, "backups")
             os.makedirs(backup_dir, exist_ok=True)
             logger.info(f"Usando directorio de respaldo predeterminado: {backup_dir}")
-            # Actualizar estado
             config_manager.update_program_state(backup_dir=backup_dir)
         
         # Asegurar que el directorio existe con permisos adecuados
         try:
-            # Probar crear el directorio con permisos explícitos
             os.makedirs(backup_dir, exist_ok=True)
             logger.info(f"Directorio de respaldo verificado: {backup_dir}")
             
-            # Verificar permisos intentando escribir un archivo temporal
             check_file = os.path.join(backup_dir, "check_write.tmp")
             try:
                 with open(check_file, 'w') as f:
@@ -156,29 +155,25 @@ def start_scheduled_backups():
                 logger.info(f"Permiso de escritura en directorio verificado")
             except Exception as write_error:
                 logger.error(f"Error de permisos de escritura en {backup_dir}: {write_error}")
-                # Intentar usar un directorio alternativo
                 backup_dir = os.path.join(APP_DIR, "backups")
                 os.makedirs(backup_dir, exist_ok=True)
                 logger.info(f"Cambiando a directorio de respaldo alternativo: {backup_dir}")
                 config_manager.update_program_state(backup_dir=backup_dir)
         except Exception as e:
             logger.error(f"Error al verificar directorio de respaldo: {e}")
-            # Intentar usar un directorio alternativo
             backup_dir = os.path.join(APP_DIR, "backups")
             os.makedirs(backup_dir, exist_ok=True)
             logger.info(f"Usando directorio de respaldo alternativo: {backup_dir}")
             config_manager.update_program_state(backup_dir=backup_dir)
         
-        # Verificar si hay servidores configurados (soporte multi-servidor)
+        # Verificar si hay servidores configurados
         enabled_servers = config_manager.get_enabled_servers()
         
         if not enabled_servers:
             logger.warning("No hay servidores habilitados configurados")
-            # Intentar migración desde formato antiguo (server.json)
             server_data = config_manager.get_server_data()
             if server_data:
                 logger.info("Migrando desde configuración de servidor único")
-                # La migración se hace automáticamente en get_servers()
                 enabled_servers = config_manager.get_enabled_servers()
                 if not enabled_servers:
                     logger.error("No se pudo migrar la configuración de servidor")
@@ -201,28 +196,24 @@ def start_scheduled_backups():
         
         logger.info(f"Servicio configurado con {len(enabled_servers)} servidor(es) habilitado(s), {valid_servers} válido(s)")
         
-        # Configurar programador con comprobación previa
+        # Configurar programador
         from backup_manager import BackupManager
         backup_manager = BackupManager()
         
-        # Función que verifica condiciones antes de ejecutar respaldo
+        # Función que ejecuta el respaldo
         def execute_backup_safely():
-            # Recargar configuración cada vez
             try:
                 current_state = config_manager.get_program_state()
                 current_enabled_servers = config_manager.get_enabled_servers()
                 
-                # Verificar si hay servidores habilitados
                 if not current_enabled_servers:
                     logger.warning("No hay servidores habilitados para ejecutar respaldo")
                     return False
                 
-                # Hacer copia local de los parámetros importantes
                 try:
                     backup_directory = current_state.get("backup_dir", backup_dir)
                     amount_value = current_state.get("amount", 5)
                     
-                    # Verificar que el directorio existe y se puede escribir
                     try:
                         os.makedirs(backup_directory, exist_ok=True)
                         check_file = os.path.join(backup_directory, "check_write.tmp")
@@ -230,95 +221,87 @@ def start_scheduled_backups():
                             f.write("check")
                         if os.path.exists(check_file):
                             os.remove(check_file)
-                        logger.info(f"Directorio de respaldo verificado con permisos: {backup_directory}")
+                        logger.info(f"Directorio de respaldo verificado: {backup_directory}")
                     except Exception as dir_error:
-                        logger.error(f"Error de permisos en directorio de respaldo: {dir_error}")
+                        logger.error(f"Error de permisos en directorio: {dir_error}")
                         return False
                     
-                    # Registrar inicio de respaldo
-                    logger.info(f"Iniciando respaldo programado de {len(current_enabled_servers)} servidor(es) en {backup_directory}")
+                    logger.info(f"Iniciando respaldo de {len(current_enabled_servers)} servidor(es)")
                     
-                    # Actualizar estado antes de ejecutar
                     config_manager.update_program_state(
                         running=True,
                         status="in_progress",
                         timestamp=datetime.datetime.now().isoformat()
                     )
                     
-                    # Ejecutar respaldo de TODOS los servidores habilitados
                     results = backup_manager.backup_all_servers(
                         backup_dir=backup_directory,
                         amount=amount_value
                     )
                     
-                    # Verificar si todos fueron exitosos
                     all_success = all(results.values()) if results else False
                     
-                    # Actualizar estado al finalizar
                     if all_success and results:
-                        config_manager.update_program_state(
-                            status="completed",
-                            running=True
-                        )
-                        logger.info(f"Respaldo programado completado: {len(results)} servidores")
+                        config_manager.update_program_state(status="completed", running=True)
+                        logger.info(f"Respaldo completado: {len(results)} servidores")
                     else:
-                        config_manager.update_program_state(
-                            status="error",
-                            running=True
-                        )
+                        config_manager.update_program_state(status="error", running=True)
                         failed = sum(1 for v in results.values() if not v)
-                        logger.warning(f"Respaldo completado con {failed} fallos")
-                        logger.error("Respaldo programado falló")
+                        logger.warning(f"Respaldo con {failed} fallos")
                     
-                    # Forzar que todos los campos estén presentes
                     config_manager.force_save_all()
-                    
                     return all_success
                 except Exception as exec_error:
-                    logger.error(f"Error durante la ejecución del respaldo: {exec_error}", exc_info=True)
-                    config_manager.update_program_state(
-                        status="error", 
-                        running=True
-                    )
+                    logger.error(f"Error durante respaldo: {exec_error}", exc_info=True)
+                    config_manager.update_program_state(status="error", running=True)
                     return False
             except Exception as e:
-                logger.error(f"Error al preparar respaldo programado: {e}", exc_info=True)
+                logger.error(f"Error al preparar respaldo: {e}", exc_info=True)
                 return False
         
-        # Programar respaldo con la función segura
-        # IMPORTANTE: Si el servicio está corriendo, SIEMPRE activar la programación
-        # Los valores de backup_hours y backup_minutes ya fueron leídos del archivo
-        if scheduled:
-            # Usar los valores configurados por el usuario
-            backup_manager.scheduler.schedule_backup(
-                backup_hours,
-                backup_minutes,
-                execute_backup_safely
-            )
-            logger.info(f"Respaldos programados iniciados: cada {backup_hours}h:{backup_minutes}m")
-        else:
-            # Si scheduled es False pero hay valores configurados (no son los defaults),
-            # usarlos en lugar de resetear a 4 horas
-            has_custom_schedule = (backup_hours != 4 or backup_minutes != 0)
+        # Programar tareas
+        if has_tasks:
+            # Usar nuevo sistema de tareas
+            logger.info(f"Configurando {len(backup_tasks)} tarea(s) programada(s)")
             
-            if has_custom_schedule:
-                # El usuario configuró valores personalizados, usarlos
-                logger.info(f"Activando respaldo con configuración existente: {backup_hours}h:{backup_minutes}m")
-                config_manager.set_backup_schedule(backup_hours, backup_minutes, True)
-                backup_manager.scheduler.schedule_backup(
-                    backup_hours,
-                    backup_minutes,
-                    execute_backup_safely
-                )
-            else:
-                # Sin configuración personalizada, usar valores por defecto
-                logger.info("No hay respaldo programado configurado, estableciendo respaldo cada 4 horas")
-                config_manager.set_backup_schedule(4, 0, True)
+            tasks_configured = 0
+            for idx, task in enumerate(backup_tasks, 1):
+                if not task.get("enabled", True):
+                    logger.info(f"Tarea {idx} deshabilitada, omitiendo")
+                    continue
+                
+                task_type = task.get("type")
+                
+                if task_type == "frequency":
+                    hours = task.get("hours", 0)
+                    minutes = task.get("minutes", 0)
+                    total_minutes = (hours * 60) + minutes
+                    
+                    if total_minutes > 0:
+                        backup_manager.scheduler.schedule_backup(hours, minutes, execute_backup_safely)
+                        logger.info(f"Tarea {idx} (frecuencia): cada {hours}h:{minutes}m")
+                        tasks_configured += 1
+                        
+                elif task_type == "fixed_time":
+                    hour = task.get("hour", 0)
+                    minute = task.get("minute", 0)
+                    # Para hora fija, usamos schedule directamente
+                    import schedule
+                    time_str = f"{str(hour).zfill(2)}:{str(minute).zfill(2)}"
+                    schedule.every().day.at(time_str).do(execute_backup_safely)
+                    logger.info(f"Tarea {idx} (hora fija): a las {time_str}")
+                    tasks_configured += 1
+            
+            if tasks_configured == 0:
+                logger.warning("Ninguna tarea configurada correctamente, creando tarea por defecto")
                 backup_manager.scheduler.schedule_backup(4, 0, execute_backup_safely)
-            
-            # Actualizar estado
-            config_manager.force_save_all()
-            logger.info(f"Respaldos programados iniciados: cada {backup_hours}h:{backup_minutes}m")
+                config_manager.set_backup_schedule(4, 0, True)
+                
+        else:
+            # Sin tareas, crear tarea por defecto (cada 4 horas)
+            logger.info("No hay tareas configuradas, creando tarea por defecto: cada 4 horas")
+            config_manager.set_backup_schedule(4, 0, True)
+            backup_manager.scheduler.schedule_backup(4, 0, execute_backup_safely)
         
         # Verificar que el scheduler está en funcionamiento
         if not backup_manager.scheduler.is_scheduled():

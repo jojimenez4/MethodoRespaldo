@@ -672,17 +672,18 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     config_manager = ConfigManager()
     program_state = config_manager.get_program_state()
     
-    # Verificar si hay respaldos programados guardados
-    if program_state.get("scheduled", False):
-        backup_hours = program_state.get("backup_hours", 4)
-        backup_minutes = program_state.get("backup_minutes", 0)
-        
-        # Configurar estado
-        AppState.set_backup_time(backup_hours, backup_minutes)
+    # Cargar tareas programadas del nuevo sistema
+    backup_tasks = config_manager.get_backup_tasks()
+    if backup_tasks:
         AppState.set_scheduled(True)
         AppState.selected_amount = program_state.get("amount", 5)
         
-        logger.info(f"Cargada configuración de respaldo: {backup_hours}h:{backup_minutes}m")
+        # Para compatibilidad con la UI, obtener la primera tarea de frecuencia
+        freq_tasks = [t for t in backup_tasks if t.get("type") == "frequency" and t.get("enabled", True)]
+        if freq_tasks:
+            AppState.set_backup_time(freq_tasks[0].get("hours", 4), freq_tasks[0].get("minutes", 0))
+        
+        logger.info(f"Cargadas {len(backup_tasks)} tarea(s) de respaldo")
     
     root = customtkinter.CTk()
     AppState.root_window = root
@@ -830,10 +831,19 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     # )
     # user_admin_button.pack(pady=5, anchor="e")
 
-    # Estado de programación
+    # Estado de programación - mostrar tareas configuradas
     schedule_status = "No programado"
-    if AppState.backup_hours is not None and AppState.backup_minutes is not None:
-        schedule_status = f"Programado: cada {AppState.backup_hours}h:{AppState.backup_minutes}m"
+    if backup_tasks:
+        enabled_tasks = [t for t in backup_tasks if t.get("enabled", True)]
+        if enabled_tasks:
+            if len(enabled_tasks) == 1:
+                task = enabled_tasks[0]
+                if task["type"] == "frequency":
+                    schedule_status = f"Programado: cada {task['hours']}h:{task['minutes']}m"
+                else:
+                    schedule_status = f"Programado: a las {str(task['hour']).zfill(2)}:{str(task['minute']).zfill(2)}"
+            else:
+                schedule_status = f"Programado: {len(enabled_tasks)} tarea(s)"
     
     schedule_label = customtkinter.CTkLabel(
         frame, 
@@ -1124,11 +1134,11 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             messagebox.showerror("Error", f"Error al ejecutar el respaldo: {e}")
 
     def schedule_backup(backup_hours: Optional[int], backup_minutes: Optional[int]) -> None:
-        """Programa un respaldo automático."""
-        if backup_hours is None or backup_minutes is None:
-            logger.warning("Intento de programar respaldo con horas o minutos nulos")
-            return
-            
+        """Programa un respaldo automático (método legacy para compatibilidad)."""
+        schedule_all_tasks()
+
+    def schedule_all_tasks() -> None:
+        """Programa todas las tareas de respaldo configuradas."""
         # Obtener estado actual para asegurar que tenemos valores válidos
         current_folder_path = folder_path
         current_server_data = server_data.copy() if server_data else None
@@ -1137,35 +1147,71 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             logger.error("No se puede programar respaldo: faltan datos de ruta o servidor")
             return
         
-        interval_seconds = (backup_hours * 3600) + (backup_minutes * 60)
-        logger.info(f"Programando respaldo cada {interval_seconds} segundos")
-        
         # Limpiar programaciones anteriores
         schedule.clear()
         
+        # Obtener tareas configuradas
+        from config_manager import ConfigManager
+        config_manager = ConfigManager()
+        backup_tasks = config_manager.get_backup_tasks()
+        
+        if not backup_tasks:
+            logger.warning("No hay tareas de respaldo configuradas")
+            return
+        
         # Función de respaldo que captura el estado actual
         def run_backup_task():
-            logger.info(f"Ejecutando tarea programada: respaldo cada {backup_hours}h:{backup_minutes}m")
+            logger.info("Ejecutando tarea programada de respaldo")
             return execute_programed_backup(current_folder_path, current_server_data)
         
-        # Programar nueva tarea
-        job = schedule.every(interval_seconds).seconds.do(run_backup_task)
-        job.tag("backup_task")
+        # Programar cada tarea
+        tasks_scheduled = 0
+        for idx, task in enumerate(backup_tasks, 1):
+            if not task.get("enabled", True):
+                logger.info(f"Tarea {idx} deshabilitada, omitiendo")
+                continue
+            
+            task_type = task.get("type")
+            
+            if task_type == "frequency":
+                hours = task.get("hours", 0)
+                minutes = task.get("minutes", 0)
+                interval_seconds = (hours * 3600) + (minutes * 60)
+                
+                if interval_seconds > 0:
+                    job = schedule.every(interval_seconds).seconds.do(run_backup_task)
+                    job.tag("backup_task")
+                    logger.info(f"Tarea {idx} (frecuencia): cada {hours}h:{minutes}m programada")
+                    tasks_scheduled += 1
+                    
+                    # Actualizar AppState con la primera tarea de frecuencia
+                    if tasks_scheduled == 1:
+                        AppState.set_backup_time(hours, minutes)
+                        
+            elif task_type == "fixed_time":
+                hour = task.get("hour", 0)
+                minute = task.get("minute", 0)
+                time_str = f"{str(hour).zfill(2)}:{str(minute).zfill(2)}"
+                
+                job = schedule.every().day.at(time_str).do(run_backup_task)
+                job.tag("backup_task")
+                logger.info(f"Tarea {idx} (hora fija): a las {time_str} programada")
+                tasks_scheduled += 1
         
-        # Actualizar estado
-        AppState.set_scheduled(True)
-        AppState.set_backup_time(backup_hours, backup_minutes)
-        
-        logger.info(f"Respaldo programado con éxito: cada {backup_hours}h:{backup_minutes}m")
-        
-        # Iniciar thread si no está activo
-        if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
-            AppState.scheduled_backup_thread = threading.Thread(
-                target=run_scheduler, 
-                daemon=True
-            )
-            AppState.scheduled_backup_thread.start()
-            logger.info("Thread de respaldos programados iniciado")
+        if tasks_scheduled > 0:
+            AppState.set_scheduled(True)
+            logger.info(f"Respaldos programados: {tasks_scheduled} tarea(s)")
+            
+            # Iniciar thread si no está activo
+            if AppState.scheduled_backup_thread is None or not AppState.scheduled_backup_thread.is_alive():
+                AppState.scheduled_backup_thread = threading.Thread(
+                    target=run_scheduler, 
+                    daemon=True
+                )
+                AppState.scheduled_backup_thread.start()
+                logger.info("Thread de respaldos programados iniciado")
+        else:
+            logger.warning("No se programaron tareas de respaldo")
     
     def run_scheduler() -> None:
         """Ejecuta el programador de tareas."""
@@ -1178,17 +1224,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 logger.warning("No hay tareas programadas al iniciar run_scheduler")
                 
                 # Intentar recuperar configuración y reprogramar
-                from config_manager import ConfigManager
-                config_manager = ConfigManager()
-                program_state = config_manager.get_program_state()
-                
-                if program_state.get("scheduled", False):
-                    backup_hours = program_state.get("backup_hours", 4)
-                    backup_minutes = program_state.get("backup_minutes", 0)
-                    
-                    # Reprogramar con la configuración guardada
-                    schedule_backup(backup_hours, backup_minutes)
-                    logger.info(f"Reprogramado respaldo con configuración guardada: {backup_hours}h:{backup_minutes}m")
+                schedule_all_tasks()
             
             # Bucle principal
             while AppState.running and AppState.scheduled:
@@ -1197,11 +1233,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 # Verificar periódicamente si hay tareas
                 if not schedule.jobs:
                     logger.warning("No hay tareas programadas durante la ejecución")
-                    
-                    # Intentar reprogramar con el estado actual
-                    if AppState.backup_hours is not None and AppState.backup_minutes is not None:
-                        schedule_backup(AppState.backup_hours, AppState.backup_minutes)
-                        logger.info(f"Reprogramado respaldo con estado actual: {AppState.backup_hours}h:{AppState.backup_minutes}m")
+                    schedule_all_tasks()
                 
                 time.sleep(1)
                 
@@ -1290,7 +1322,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
         create_system_tray_icon()
     
     def show_backup_history(label_widget: customtkinter.CTkLabel) -> None:
-        """Muestra el historial de respaldos realizados."""
+        """Muestra el historial de respaldos realizados, agrupados por servidor."""
         if "history_window" in active_windows and active_windows["history_window"].winfo_exists():
             active_windows["history_window"].lift()
             active_windows['history_window'].focus_force()
@@ -1303,29 +1335,64 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                 
             if not os.path.exists(backup_dir):
                 raise ValueError("El directorio de respaldos no existe.")
-                
-            # Buscar archivos de respaldo
-            backup_files = [
-                entry.path for entry in os.scandir(backup_dir) if entry.is_file() and entry.name.endswith(".7z")
-            ]
             
-            if not backup_files:
+            # Obtener información de servidores configurados
+            servers_info = {}
+            try:
+                enabled_servers = config_manager.get_servers()
+                for server in enabled_servers:
+                    server_id = server.get("id", "")
+                    server_name = server.get("name", server.get("client", server_id))
+                    servers_info[server_id] = server_name
+            except Exception:
+                pass
+            
+            # Estructura para almacenar respaldos por servidor
+            backups_by_server = {}
+            
+            # Buscar subcarpetas de servidor (server_1, server_2, etc.)
+            server_folders = []
+            root_backup_files = []
+            
+            for entry in os.scandir(backup_dir):
+                if entry.is_dir() and entry.name.startswith("server_"):
+                    server_folders.append(entry)
+                elif entry.is_file() and entry.name.endswith(".7z"):
+                    root_backup_files.append(entry.path)
+            
+            # Procesar carpetas de servidor
+            for server_folder in server_folders:
+                server_id = server_folder.name
+                server_name = servers_info.get(server_id, server_id)
+                
+                server_backups = [
+                    entry.path for entry in os.scandir(server_folder.path) 
+                    if entry.is_file() and entry.name.endswith(".7z")
+                ]
+                
+                if server_backups:
+                    server_backups.sort(key=os.path.getmtime, reverse=True)
+                    backups_by_server[server_id] = {
+                        "name": server_name,
+                        "files": server_backups
+                    }
+            
+            # Procesar archivos en la raíz (modo legacy o servidor único)
+            if root_backup_files:
+                root_backup_files.sort(key=os.path.getmtime, reverse=True)
+                backups_by_server["_root"] = {
+                    "name": "General",
+                    "files": root_backup_files
+                }
+            
+            if not backups_by_server:
                 raise ValueError("No hay respaldos disponibles en el directorio seleccionado.")
-                
-            # Ordenar por fecha de modificación (más reciente primero)
-            backup_files.sort(key=os.path.getmtime, reverse=True)
-            
-            # Crear lista formateada
-            backup_history = [
-                f"{os.path.basename(file)} - {datetime.datetime.fromtimestamp(os.path.getmtime(file)).strftime('%Y-%m-%d %H:%M:%S')}"
-                for file in backup_files
-            ]
             
             # Mostrar en ventana de diálogo
             history_window = customtkinter.CTkToplevel(root)
             active_windows["history_window"] = history_window
             history_window.title("Historial de Respaldos")
-            center_window(history_window, 600, 400)
+            center_window(history_window, 700, 500)
             
             history_frame = customtkinter.CTkFrame(history_window)
             history_frame.pack(pady=10, padx=10, fill="both", expand=True)
@@ -1339,22 +1406,92 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
             )
             title_label.pack(pady=10)
             
+            # Info del total de servidores
+            total_servers = len([k for k in backups_by_server.keys() if k != "_root"])
+            total_backups = sum(len(data["files"]) for data in backups_by_server.values())
+            
+            info_text = f"📁 {total_backups} respaldo(s)"
+            if total_servers > 0:
+                info_text += f" en {total_servers} servidor(es)"
+            
+            info_label = customtkinter.CTkLabel(
+                history_frame,
+                text=info_text,
+                font=("Arial", 11),
+                text_color="gray"
+            )
+            info_label.pack(pady=(0, 5))
+            
             # Crear scrollable frame para la lista
             scrollable_frame = customtkinter.CTkScrollableFrame(history_frame)
             scrollable_frame.pack(fill="both", expand=True, padx=10, pady=10)
             
-            # Añadir items a la lista
-            for i, history_item in enumerate(backup_history):
-                item_frame = customtkinter.CTkFrame(scrollable_frame)
-                item_frame.pack(fill="x", pady=2)
+            # Ordenar servidores: primero los server_X, luego _root
+            sorted_servers = sorted(
+                backups_by_server.keys(),
+                key=lambda x: (x == "_root", x)
+            )
+            
+            # Añadir items agrupados por servidor
+            for server_id in sorted_servers:
+                server_data = backups_by_server[server_id]
+                server_name = server_data["name"]
+                server_files = server_data["files"]
                 
-                item_label = customtkinter.CTkLabel(
-                    item_frame,
-                    text=history_item,
-                    anchor="w",
-                    font=("Arial", 12)
-                )
-                item_label.pack(side="left", fill="x", expand=True, padx=5)
+                # Header del servidor
+                if len(backups_by_server) > 1 or server_id != "_root":
+                    header_frame = customtkinter.CTkFrame(scrollable_frame, fg_color="transparent")
+                    header_frame.pack(fill="x", pady=(10, 5))
+                    
+                    display_name = server_name if server_id == "_root" else f"🖥️ {server_name}"
+                    if server_id != "_root" and server_id != server_name:
+                        display_name += f" ({server_id})"
+                    
+                    header_label = customtkinter.CTkLabel(
+                        header_frame,
+                        text=f"{display_name} — {len(server_files)} respaldo(s)",
+                        font=("Arial", 13, "bold"),
+                        anchor="w"
+                    )
+                    header_label.pack(side="left", fill="x", padx=5)
+                
+                # Lista de archivos de este servidor
+                for backup_file in server_files:
+                    item_frame = customtkinter.CTkFrame(scrollable_frame)
+                    item_frame.pack(fill="x", pady=2, padx=(20 if len(backups_by_server) > 1 else 0, 0))
+                    
+                    file_name = os.path.basename(backup_file)
+                    file_date = datetime.datetime.fromtimestamp(
+                        os.path.getmtime(backup_file)
+                    ).strftime('%Y-%m-%d %H:%M:%S')
+                    file_size = os.path.getsize(backup_file)
+                    
+                    # Formatear tamaño
+                    if file_size >= 1024 * 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024 * 1024):.2f} GB"
+                    elif file_size >= 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024):.1f} MB"
+                    elif file_size >= 1024:
+                        size_str = f"{file_size / 1024:.1f} KB"
+                    else:
+                        size_str = f"{file_size} B"
+                    
+                    item_label = customtkinter.CTkLabel(
+                        item_frame,
+                        text=f"📦 {file_name}",
+                        anchor="w",
+                        font=("Arial", 11)
+                    )
+                    item_label.pack(side="left", fill="x", expand=True, padx=5)
+                    
+                    details_label = customtkinter.CTkLabel(
+                        item_frame,
+                        text=f"{size_str}  •  {file_date}",
+                        anchor="e",
+                        font=("Arial", 10),
+                        text_color="gray"
+                    )
+                    details_label.pack(side="right", padx=5)
 
             def on_history_close() -> None:
                 """Maneja el cierre de la ventana de historial."""
@@ -1404,290 +1541,647 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
-def open_advance_options(parent_window: customtkinter.CTk, rounded_label: customtkinter.CTkLabel, schedule_func: Optional[Callable] = None) -> None:
-    """Abre la ventana de opciones avanzadas."""
-    # Si hay un respaldo programado, confirmar pausa
-    if AppState.scheduled:
-        pause_message = (
-            f"Se pausará el respaldo automático programado "
-            f"({str(AppState.backup_hours).zfill(2)}:{str(AppState.backup_minutes).zfill(2)}). "
-            f"¿Estás seguro que quieres continuar?"
+def open_task_assignment_window(parent_window: customtkinter.CTk, on_save_callback: Optional[Callable] = None) -> None:
+    """
+    Abre la ventana de asignación de tareas de respaldo.
+    
+    Args:
+        parent_window: Ventana padre
+        on_save_callback: Función a llamar cuando se guarden las tareas
+    """
+    from config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
+    # Crear ventana
+    task_window = customtkinter.CTkToplevel(parent_window)
+    task_window.title("Asignar Tareas de Respaldo")
+    task_window.configure(fg_color=("#2b2b2b", "#2b2b2b"))
+    task_window.transient(parent_window)
+    task_window.grab_set()
+    center_window(task_window, 600, 450)
+    task_window.after(10, lambda: task_window.focus_force())
+    
+    # Frame principal
+    main_frame = customtkinter.CTkFrame(task_window)
+    main_frame.pack(pady=15, padx=15, fill="both", expand=True)
+    
+    # Título
+    title_label = customtkinter.CTkLabel(
+        main_frame,
+        text="Configuración de Tareas Programadas",
+        font=("Roboto", 18, "bold")
+    )
+    title_label.pack(pady=(15, 5))
+    
+    # Descripción
+    desc_label = customtkinter.CTkLabel(
+        main_frame,
+        text="Puede configurar hasta 3 tareas de respaldo.\nTipo 'Frecuencia': ejecuta cada X tiempo. Tipo 'Hora Fija': ejecuta a una hora específica.",
+        font=("Roboto", 12),
+        text_color="gray"
+    )
+    desc_label.pack(pady=(0, 15))
+    
+    # Frame scrollable para las tareas
+    tasks_container = customtkinter.CTkScrollableFrame(main_frame, height=180)
+    tasks_container.pack(pady=5, padx=10, fill="both", expand=True)
+    
+    # Lista para almacenar los widgets de tareas
+    task_widgets = []
+    
+    def validate_number(value, max_val):
+        """Valida que el valor sea un número dentro del rango."""
+        if value == "":
+            return True
+        try:
+            num = int(value)
+            return 0 <= num <= max_val
+        except ValueError:
+            return False
+    
+    def create_task_widget(task_data: Optional[dict] = None) -> customtkinter.CTkFrame:
+        """Crea un widget para una tarea individual."""
+        if len(task_widgets) >= 3:
+            messagebox.showwarning("Límite alcanzado", "No se pueden agregar más de 3 tareas.")
+            return None
+        
+        task_frame = customtkinter.CTkFrame(tasks_container)
+        task_frame.pack(pady=8, padx=5, fill="x")
+        
+        # Número de tarea
+        task_num = len(task_widgets) + 1
+        num_label = customtkinter.CTkLabel(task_frame, text=f"Tarea {task_num}:", font=("Roboto", 13, "bold"), width=80)
+        num_label.pack(side="left", padx=(10, 5))
+        
+        # Mapeo de tipos
+        type_display = {"frequency": "Frecuencia", "fixed_time": "Hora Fija"}
+        type_values = {"Frecuencia": "frequency", "Hora Fija": "fixed_time"}
+        
+        # Determinar valores iniciales
+        initial_type = task_data.get("type", "frequency") if task_data else "frequency"
+        initial_display = type_display.get(initial_type, "Frecuencia")
+        
+        if initial_type == "frequency":
+            initial_hour = str(task_data.get("hours", 0)) if task_data else "0"
+            initial_minute = str(task_data.get("minutes", 10)) if task_data else "10"
+        else:
+            initial_hour = str(task_data.get("hour", 12)).zfill(2) if task_data else "12"
+            initial_minute = str(task_data.get("minute", 0)).zfill(2) if task_data else "00"
+        
+        # Variables para los valores - inicializadas con los datos
+        hour_var = customtkinter.StringVar(value=initial_hour)
+        minute_var = customtkinter.StringVar(value=initial_minute)
+        enabled_var = customtkinter.BooleanVar(value=task_data.get("enabled", True) if task_data else True)
+        
+        current_type = {"value": initial_type}
+        
+        # Tipo de tarea (con nombres legibles)
+        type_combo = customtkinter.CTkComboBox(
+            task_frame,
+            values=["Frecuencia", "Hora Fija"],
+            width=120,
+            font=("Roboto", 12),
+            state="readonly"
         )
-        if not messagebox.askyesno("Confirmación", pause_message):
+        type_combo.pack(side="left", padx=5)
+        type_combo.set(initial_display)
+        
+        # Frame para los campos de tiempo (cambia según el tipo)
+        time_frame = customtkinter.CTkFrame(task_frame, fg_color="transparent")
+        time_frame.pack(side="left", padx=5, fill="x", expand=True)
+        
+        def get_actual_type():
+            """Obtiene el tipo real basado en el display."""
+            display_val = type_combo.get()
+            return type_values.get(display_val, "frequency")
+        
+        def update_time_fields(new_type=None):
+            """Actualiza los campos según el tipo seleccionado."""
+            # Limpiar campos anteriores
+            for widget in time_frame.winfo_children():
+                widget.destroy()
+            
+            actual_type = get_actual_type()
+            
+            # Si cambió el tipo, resetear valores apropiados
+            if new_type is not None:
+                if actual_type == "frequency":
+                    hour_var.set("0")
+                    minute_var.set("10")
+                else:
+                    hour_var.set("12")
+                    minute_var.set("00")
+            
+            if actual_type == "frequency":
+                # Campos para frecuencia: Horas y Minutos de intervalo
+                h_label = customtkinter.CTkLabel(time_frame, text="Cada:", font=("Roboto", 12))
+                h_label.pack(side="left", padx=(0, 5))
+                
+                hour_entry = customtkinter.CTkEntry(
+                    time_frame,
+                    textvariable=hour_var,
+                    width=50,
+                    font=("Roboto", 12),
+                    justify="center"
+                )
+                hour_entry.pack(side="left", padx=2)
+                
+                h_label2 = customtkinter.CTkLabel(time_frame, text="h", font=("Roboto", 12))
+                h_label2.pack(side="left", padx=(0, 8))
+                
+                min_entry = customtkinter.CTkEntry(
+                    time_frame,
+                    textvariable=minute_var,
+                    width=50,
+                    font=("Roboto", 12),
+                    justify="center"
+                )
+                min_entry.pack(side="left", padx=2)
+                
+                m_label = customtkinter.CTkLabel(time_frame, text="m", font=("Roboto", 12))
+                m_label.pack(side="left")
+                    
+            else:  # fixed_time
+                # Campos para hora fija: Hora específica del día
+                h_label = customtkinter.CTkLabel(time_frame, text="A las:", font=("Roboto", 12))
+                h_label.pack(side="left", padx=(0, 5))
+                
+                hour_entry = customtkinter.CTkEntry(
+                    time_frame,
+                    textvariable=hour_var,
+                    width=50,
+                    font=("Roboto", 12),
+                    justify="center"
+                )
+                hour_entry.pack(side="left", padx=2)
+                
+                sep_label = customtkinter.CTkLabel(time_frame, text=":", font=("Roboto", 14, "bold"))
+                sep_label.pack(side="left")
+                
+                min_entry = customtkinter.CTkEntry(
+                    time_frame,
+                    textvariable=minute_var,
+                    width=50,
+                    font=("Roboto", 12),
+                    justify="center"
+                )
+                min_entry.pack(side="left", padx=2)
+                
+                hrs_label = customtkinter.CTkLabel(time_frame, text="hrs", font=("Roboto", 11), text_color="gray")
+                hrs_label.pack(side="left", padx=(3, 0))
+        
+        # Checkbox habilitado
+        enabled_check = customtkinter.CTkCheckBox(
+            task_frame,
+            text="",
+            variable=enabled_var,
+            width=24,
+            checkbox_width=20,
+            checkbox_height=20
+        )
+        enabled_check.pack(side="left", padx=8)
+        
+        # Guardar referencia antes de crear el botón eliminar
+        task_info = {
+            "frame": task_frame,
+            "num_label": num_label,
+            "type_combo": type_combo,
+            "type_values": type_values,
+            "time_frame": time_frame,
+            "hour_var": hour_var,
+            "minute_var": minute_var,
+            "enabled_var": enabled_var
+        }
+        
+        # Botón eliminar
+        def remove_task():
+            task_widgets.remove(task_info)
+            task_frame.destroy()
+            # Renumerar tareas restantes
+            for i, tw in enumerate(task_widgets):
+                tw["num_label"].configure(text=f"Tarea {i+1}:")
+            update_info_label()
+        
+        remove_btn = customtkinter.CTkButton(
+            task_frame,
+            text="✕",
+            width=32,
+            height=32,
+            font=("Roboto", 14),
+            fg_color="#dc3545",
+            hover_color="#c82333",
+            command=remove_task
+        )
+        remove_btn.pack(side="right", padx=8)
+        
+        # Vincular cambio de tipo - pasar argumento para indicar que es un cambio manual
+        type_combo.configure(command=lambda x: update_time_fields(x))
+        
+        # Inicializar campos sin resetear valores
+        update_time_fields()
+        
+        task_widgets.append(task_info)
+        
+        return task_frame
+    
+    # Cargar tareas existentes
+    existing_tasks = config_manager.get_backup_tasks()
+    for task in existing_tasks:
+        create_task_widget(task)
+    
+    # Si no hay tareas, crear una por defecto
+    if not task_widgets:
+        create_task_widget({"type": "frequency", "hours": 4, "minutes": 0, "enabled": True})
+    
+    # Frame para botones de acción
+    action_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+    action_frame.pack(pady=10, fill="x")
+    
+    # Etiqueta informativa
+    info_label = customtkinter.CTkLabel(
+        action_frame,
+        text=f"({len(task_widgets)}/3 tareas)",
+        font=("Roboto", 12),
+        text_color="gray"
+    )
+    info_label.pack(side="right", padx=15)
+    
+    def update_info_label():
+        info_label.configure(text=f"({len(task_widgets)}/3 tareas)")
+    
+    # Botón añadir tarea
+    def add_new_task():
+        create_task_widget()
+        update_info_label()
+    
+    add_btn = customtkinter.CTkButton(
+        action_frame,
+        text="+ Añadir Tarea",
+        width=130,
+        height=32,
+        font=("Roboto", 13),
+        fg_color="#28a745",
+        hover_color="#218838",
+        command=add_new_task
+    )
+    add_btn.pack(side="left", padx=15)
+    
+    # Frame para botones guardar/cancelar
+    button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+    button_frame.pack(pady=15, fill="x", side="bottom")
+    
+    def save_tasks():
+        """Guarda las tareas configuradas."""
+        tasks = []
+        for tw in task_widgets:
+            display_val = tw["type_combo"].get()
+            task_type = tw["type_values"].get(display_val, "frequency")
+            enabled = tw["enabled_var"].get()
+            
+            time_frame = tw["time_frame"]
+            entries = [child for child in time_frame.winfo_children() 
+                      if isinstance(child, customtkinter.CTkEntry)]
+            
+            if len(entries) < 2:
+                messagebox.showerror("Error", "No se encontraron los campos de tiempo.", parent=task_window)
+                task_window.lift()
+                task_window.focus_force()
+                return
+            
+            try:
+                hour_val = entries[0].get().strip() or "0"
+                minute_val = entries[1].get().strip() or "0"
+                
+                if task_type == "frequency":
+                    hours = int(hour_val)
+                    minutes = int(minute_val)
+                    
+                    if hours == 0 and minutes == 0:
+                        messagebox.showwarning("Advertencia", "La frecuencia no puede ser 0 horas y 0 minutos.", parent=task_window)
+                        task_window.lift()
+                        task_window.focus_force()
+                        return
+                    
+                    if hours < 0 or hours > 24:
+                        messagebox.showwarning("Advertencia", "Las horas deben estar entre 0 y 24.", parent=task_window)
+                        task_window.lift()
+                        task_window.focus_force()
+                        return
+                    
+                    if minutes < 0 or minutes > 59:
+                        messagebox.showwarning("Advertencia", "Los minutos deben estar entre 0 y 59.", parent=task_window)
+                        task_window.lift()
+                        task_window.focus_force()
+                        return
+                    
+                    tasks.append({
+                        "type": "frequency",
+                        "hours": hours,
+                        "minutes": minutes,
+                        "enabled": enabled
+                    })
+                else:  # fixed_time
+                    hour = int(hour_val)
+                    minute = int(minute_val)
+                    
+                    if hour < 0 or hour > 23:
+                        messagebox.showwarning("Advertencia", "La hora debe estar entre 0 y 23.", parent=task_window)
+                        task_window.lift()
+                        task_window.focus_force()
+                        return
+                    
+                    if minute < 0 or minute > 59:
+                        messagebox.showwarning("Advertencia", "Los minutos deben estar entre 0 y 59.", parent=task_window)
+                        task_window.lift()
+                        task_window.focus_force()
+                        return
+                    
+                    tasks.append({
+                        "type": "fixed_time",
+                        "hour": hour,
+                        "minute": minute,
+                        "enabled": enabled
+                    })
+            except ValueError as e:
+                messagebox.showerror("Error", f"Ingrese solo números válidos en los campos de tiempo.", parent=task_window)
+                task_window.lift()
+                task_window.focus_force()
+                return
+        
+        if not tasks:
+            messagebox.showwarning("Advertencia", "Debe configurar al menos una tarea.", parent=task_window)
+            task_window.lift()
+            task_window.focus_force()
             return
-        AppState.set_scheduled(False)
+        
+        # Guardar tareas
+        if config_manager.set_backup_tasks(tasks):
+            logger.info(f"Tareas guardadas: {tasks}")
+            messagebox.showinfo("Éxito", f"Se guardaron {len(tasks)} tarea(s) correctamente.", parent=task_window)
+            
+            if on_save_callback:
+                on_save_callback(tasks)
+            
+            task_window.destroy()
+        else:
+            messagebox.showerror("Error", "No se pudieron guardar las tareas.", parent=task_window)
+            task_window.lift()
+            task_window.focus_force()
+    
+    def cancel():
+        task_window.destroy()
+    
+    save_btn = customtkinter.CTkButton(
+        button_frame,
+        text="Guardar Tareas",
+        width=130,
+        height=36,
+        font=("Roboto", 13),
+        fg_color="#007bff",
+        hover_color="#0056b3",
+        command=save_tasks
+    )
+    save_btn.pack(side="left", padx=15)
+    
+    cancel_btn = customtkinter.CTkButton(
+        button_frame,
+        text="Cancelar",
+        width=110,
+        height=36,
+        font=("Roboto", 13),
+        fg_color="#6c757d",
+        hover_color="#5a6268",
+        command=cancel
+    )
+    cancel_btn.pack(side="left", padx=5)
+    
+    task_window.mainloop()
 
+def open_advance_options(parent_window: customtkinter.CTk, rounded_label: customtkinter.CTkLabel, schedule_func: Optional[Callable] = None) -> None:
+    """Abre la ventana de opciones avanzadas con diseño mejorado."""
+    from config_manager import ConfigManager
+    config_manager = ConfigManager()
+    
     # Crear ventana de configuración
     root = customtkinter.CTk()
     root.title("Configuración Avanzada")
-    center_window(root, 500, 500)
+    center_window(root, 480, 550)
 
-    frame = customtkinter.CTkFrame(root)
-    frame.pack(pady=20, padx=60, fill="both")
+    # Frame principal
+    main_frame = customtkinter.CTkFrame(root)
+    main_frame.pack(pady=15, padx=20, fill="both", expand=True)
 
-    # Sección de respaldo automático
-    autorespaldos_label = customtkinter.CTkLabel(
-        frame, 
-        text="Respaldo Automático", 
-        font=("Arial", 14, "bold")
+    # Título
+    title_label = customtkinter.CTkLabel(
+        main_frame, 
+        text="Configuración Avanzada", 
+        font=("Roboto", 18, "bold")
     )
-    autorespaldos_label.pack(pady=5)
+    title_label.pack(pady=(15, 20))
 
-    # Marco para tareas programadas
-    tasks_frame = customtkinter.CTkFrame(frame)
-    tasks_frame.pack(pady=5, padx=10, fill="x", expand=True)
-
-    # Lista para almacenar tareas adicionales
-    additional_tasks = []
+    # ========== Sección: Tareas Programadas ==========
+    tasks_section = customtkinter.CTkFrame(main_frame)
+    tasks_section.pack(pady=10, padx=15, fill="x")
     
-    # Etiqueta para mostrar tareas configuradas
-    tasks_label = customtkinter.CTkLabel(
-        tasks_frame, 
-        text="Tareas configuradas:\n", 
-        font=("Arial", 12), 
-        anchor="w", 
+    tasks_header = customtkinter.CTkLabel(
+        tasks_section,
+        text="📅 Tareas de Respaldo Programadas",
+        font=("Roboto", 14, "bold"),
+        anchor="w"
+    )
+    tasks_header.pack(pady=(10, 5), padx=10, anchor="w")
+    
+    # Mostrar resumen de tareas actuales
+    tasks = config_manager.get_backup_tasks()
+    if tasks:
+        tasks_summary = ""
+        for i, task in enumerate(tasks, 1):
+            status_icon = "✓" if task.get("enabled", True) else "○"
+            if task["type"] == "frequency":
+                tasks_summary += f"  {status_icon} Tarea {i} [Frecuencia]: Cada {task['hours']}h:{task['minutes']}m\n"
+            else:
+                tasks_summary += f"  {status_icon} Tarea {i} [Hora Fija]: A las {str(task['hour']).zfill(2)}:{str(task['minute']).zfill(2)}\n"
+    else:
+        tasks_summary = "  No hay tareas configuradas"
+    
+    tasks_info = customtkinter.CTkLabel(
+        tasks_section,
+        text=tasks_summary,
+        font=("Roboto", 12),
+        anchor="w",
         justify="left"
     )
-    tasks_label.pack(pady=5, padx=5, fill="x")
-
-    def add_task(hour: str = "00", minute: str = "00") -> None:
-        """Añade una nueva tarea programada."""
-        if len(additional_tasks) >= 3:
-            messagebox.showerror("Error", "No se pueden agregar más de 3 tareas en total.")
-            return
-
-        # Crear frame para la tarea
-        task_frame = customtkinter.CTkFrame(tasks_frame)
-
-        # Selector de hora
-        task_hour_label = customtkinter.CTkLabel(task_frame, text="Hora:")
-        task_hour_label.pack(side="left", padx=(10, 5), anchor="w")
-        task_hour_combobox = customtkinter.CTkComboBox(
-            task_frame, 
-            values=[str(h).zfill(2) for h in range(24)], 
-            width=80, 
-            justify="center"
-        )
-        task_hour_combobox.set(hour)
-        task_hour_combobox.pack(side="left", padx=(5, 5), anchor="w")
-
-        # Selector de minuto
-        task_minute_label = customtkinter.CTkLabel(task_frame, text="Minuto:")
-        task_minute_label.pack(side="left", padx=(5, 5), anchor="w")
-        task_minute_combobox = customtkinter.CTkComboBox(
-            task_frame, 
-            values=[str(m).zfill(2) for m in range(60)], 
-            width=80, 
-            justify="center"
-        )
-        task_minute_combobox.set(minute)
-        task_minute_combobox.pack(side="left", padx=(5, 5), anchor="w")
-
-        # Botón para eliminar tarea
-        remove_button = customtkinter.CTkButton(
-            task_frame, 
-            text="-", 
-            width=30, 
-            fg_color="red", 
-            command=lambda: remove_task(task_frame)
-        )
-        remove_button.pack(side="left", padx=(5, 5))
-
-        task_frame.pack(pady=5, padx=10, fill="x")
-
-        # Añadir a la lista de tareas
-        additional_tasks.append((task_frame, task_hour_combobox, task_minute_combobox))
-        update_tasks_label()
-
-    def remove_task(task_frame: customtkinter.CTkFrame) -> None:
-        """Elimina una tarea programada."""
-        for task in additional_tasks:
-            if task[0] == task_frame:
-                additional_tasks.remove(task)
-                task_frame.destroy()
-                break
-        update_tasks_label()
-
-    def update_tasks_label() -> None:
-        """Actualiza la etiqueta con las tareas configuradas."""
-        tasks_text = "Tareas configuradas:\n"
-        AppState.task_configurations.clear()
-        
-        for idx, (_, hour_combobox, minute_combobox) in enumerate(additional_tasks, start=1):
-            hour = hour_combobox.get()
-            minute = minute_combobox.get()
-            AppState.task_configurations.append((hour, minute))
-            tasks_text += f"Tarea {idx}: {hour}:{minute}\n"
+    tasks_info.pack(pady=5, padx=15, anchor="w")
+    
+    # Botón para abrir ventana de tareas
+    def open_tasks():
+        def on_tasks_saved(new_tasks):
+            # Actualizar resumen
+            if new_tasks:
+                summary = ""
+                for i, task in enumerate(new_tasks, 1):
+                    status_icon = "✓" if task.get("enabled", True) else "○"
+                    if task["type"] == "frequency":
+                        summary += f"  {status_icon} Tarea {i} [Frecuencia]: Cada {task['hours']}h:{task['minutes']}m\n"
+                    else:
+                        summary += f"  {status_icon} Tarea {i} [Hora Fija]: A las {str(task['hour']).zfill(2)}:{str(task['minute']).zfill(2)}\n"
+            else:
+                summary = "  No hay tareas configuradas"
+            tasks_info.configure(text=summary)
             
-        tasks_label.configure(text=tasks_text)
-
-    # Botón para añadir tarea
-    add_task_button = customtkinter.CTkButton(
-        frame, 
-        text="+", 
-        width=30, 
-        fg_color="green", 
-        command=add_task
+            # Activar programación si hay tareas
+            if new_tasks and schedule_func:
+                freq_tasks = [t for t in new_tasks if t["type"] == "frequency" and t.get("enabled", True)]
+                if freq_tasks:
+                    AppState.set_backup_time(freq_tasks[0]["hours"], freq_tasks[0]["minutes"])
+                    AppState.set_scheduled(True)
+        
+        open_task_assignment_window(root, on_tasks_saved)
+    
+    assign_btn = customtkinter.CTkButton(
+        tasks_section,
+        text="Asignar Tareas",
+        width=140,
+        height=34,
+        font=("Roboto", 13),
+        fg_color="#007bff",
+        hover_color="#0056b3",
+        command=open_tasks
     )
-    add_task_button.pack(pady=10, padx=20, anchor="e")
+    assign_btn.pack(pady=10, padx=15, anchor="e")
 
-    # Añadir tareas existentes
-    for hour, minute in AppState.task_configurations:
-        add_task(hour, minute)
-
-    # Control de cantidad máxima de respaldos
-    spinbox_var = customtkinter.IntVar(value=AppState.selected_amount)
-    spinbox_frame = customtkinter.CTkFrame(frame)
-    spinbox_frame.pack(pady=10, side="bottom")
-
-    delete_label = customtkinter.CTkLabel(spinbox_frame, text="Cantidad máx respaldos:")
-    delete_label.pack(side="left", padx=5)
-
-    numeric_entry = customtkinter.CTkEntry(
-        spinbox_frame, 
-        textvariable=spinbox_var, 
-        width=50, 
-        justify="center"
+    # ========== Sección: Cantidad de Respaldos ==========
+    amount_section = customtkinter.CTkFrame(main_frame)
+    amount_section.pack(pady=10, padx=15, fill="x")
+    
+    amount_header = customtkinter.CTkLabel(
+        amount_section,
+        text="📁 Cantidad Máxima de Respaldos",
+        font=("Roboto", 14, "bold"),
+        anchor="w"
     )
-    numeric_entry.pack(side="left", padx=5)
+    amount_header.pack(pady=(10, 5), padx=10, anchor="w")
+    
+    amount_desc = customtkinter.CTkLabel(
+        amount_section,
+        text="Número máximo de archivos de respaldo a conservar por servidor:",
+        font=("Roboto", 12),
+        text_color="gray",
+        anchor="w"
+    )
+    amount_desc.pack(pady=(0, 5), padx=15, anchor="w")
+    
+    # Control de cantidad
+    current_amount = config_manager.get_program_state().get("amount", 5)
+    if current_amount is None or current_amount < 1:
+        current_amount = 5
+    
+    spinbox_frame = customtkinter.CTkFrame(amount_section, fg_color="transparent")
+    spinbox_frame.pack(pady=10, padx=15)
 
-    def decrease_value() -> None:
-        """Disminuye el valor del spinbox."""
-        current_value = spinbox_var.get()
-        if current_value > 1:
-            spinbox_var.set(current_value - 1)
-            numeric_entry.delete(0, "end")
-            numeric_entry.insert(0, str(spinbox_var.get()))
+    def get_current_amount():
+        """Obtiene el valor actual como entero directamente del Entry."""
+        try:
+            val = numeric_entry.get().strip()
+            if not val:
+                return 5
+            return max(1, min(100, int(val)))
+        except (ValueError, TypeError):
+            return 5
+
+    def decrease_value():
+        val = get_current_amount()
+        new_val = max(1, val - 1)
+        numeric_entry.delete(0, "end")
+        numeric_entry.insert(0, str(new_val))
+
+    def increase_value():
+        val = get_current_amount()
+        new_val = min(100, val + 1)
+        numeric_entry.delete(0, "end")
+        numeric_entry.insert(0, str(new_val))
 
     decrease_button = customtkinter.CTkButton(
-        spinbox_frame, 
-        text="-", 
-        width=30, 
-        command=decrease_value, 
-        fg_color="red"
+        spinbox_frame, text="−", width=44, height=36, 
+        font=("Roboto", 18, "bold"),
+        fg_color="#dc3545", hover_color="#c82333",
+        command=decrease_value
     )
     decrease_button.pack(side="left", padx=5)
 
-    def increase_value() -> None:
-        """Aumenta el valor del spinbox."""
-        current_value = spinbox_var.get()
-        if current_value < 100:
-            spinbox_var.set(current_value + 1)
-            numeric_entry.delete(0, "end")
-            numeric_entry.insert(0, str(spinbox_var.get()))
+    numeric_entry = customtkinter.CTkEntry(
+        spinbox_frame, width=70, height=36,
+        font=("Roboto", 14), justify="center"
+    )
+    numeric_entry.pack(side="left", padx=5)
+    numeric_entry.insert(0, str(current_amount))
 
     increase_button = customtkinter.CTkButton(
-        spinbox_frame, 
-        text="+", 
-        width=30, 
-        command=increase_value, 
-        fg_color="green"
+        spinbox_frame, text="+", width=44, height=36,
+        font=("Roboto", 18, "bold"),
+        fg_color="#28a745", hover_color="#218838",
+        command=increase_value
     )
-    increase_button.pack(side="right", padx=0)
+    increase_button.pack(side="left", padx=5)
 
+    # ========== Botón Guardar (al final) ==========
     def save_advanced_settings():
         """Guarda la configuración avanzada."""
         try:
-            # Procesar tareas configuradas
-            AppState.task_configurations.clear()
-            for task_frame, task_hour_combobox, task_minute_combobox in additional_tasks:
-                try:
-                    task_hours = int(task_hour_combobox.get())
-                    task_minutes = int(task_minute_combobox.get())
-                except ValueError:
-                    raise ValueError("Horas o minutos deben ser valores numéricos.")
-                    
-                if task_hours < 0 or task_hours > 23 or task_minutes < 0 or task_minutes > 59:
-                    raise ValueError("Horas o minutos inválidos en una tarea adicional.")
-                    
-                AppState.task_configurations.append((str(task_hours).zfill(2), str(task_minutes).zfill(2)))
-
-            # Configurar cantidad máxima de respaldos - PERMITIR CUALQUIER VALOR > 0
-            selected_amount = spinbox_var.get()
-            if selected_amount <= 0:  # Solo validar que sea positivo
-                logger.warning(f"Valor de respaldos ({selected_amount}) debe ser mayor que 0. Ajustando.")
-                selected_amount = 5  # Valor predeterminado razonable
-                spinbox_var.set(5)
-                
+            selected_amount = get_current_amount()
+            if selected_amount <= 0:
+                selected_amount = 5
+                numeric_entry.delete(0, "end")
+                numeric_entry.insert(0, "5")
+            
             AppState.set_amount(selected_amount)
             
             # Verificar directorio de destino
             folder_path = rounded_label.cget("text")
-            if not folder_path:
+            if not folder_path or folder_path == "Seleccionar carpeta...":
                 raise ValueError("No se ha seleccionado ninguna carpeta de destino.")
             
-            # Importar ConfigManager y preparar la configuración
-            from config_manager import ConfigManager
-            config_manager = ConfigManager()
+            # Guardar configuración
+            config_manager.update_program_state(
+                amount=selected_amount,
+                backup_dir=folder_path
+            )
             
-            # Guardar toda la configuración de una vez
-            update_data = {
-                "amount": selected_amount,  # USAR EL VALOR CONFIGURADO SIN AJUSTAR
-                "backup_dir": folder_path
-            }
-            
-            # Si hay tareas programadas, incluir la configuración de tiempo
-            if AppState.task_configurations:
-                hours = int(AppState.task_configurations[0][0])
-                minutes = int(AppState.task_configurations[0][1])
-                
-                # Actualizar estado en memoria
-                AppState.set_backup_time(hours, minutes)
-                AppState.set_scheduled(True)
-                
-                # Añadir configuración de tiempo al diccionario de actualización
-                update_data["backup_hours"] = hours
-                update_data["backup_minutes"] = minutes
-                update_data["scheduled"] = True
-                
-                if schedule_func:
-                    schedule_func(hours, minutes)  # Llamar a la función de programación si se proporciona
-                    logger.info(f"Respaldo programado cada {hours}h:{minutes}m")
-                else:
-                    logger.error("No se pudo programar el respaldo: función no disponible")
-            else:
-                # Si no hay tareas, usar configuración por defecto (4 horas)
-                logger.info("No hay tareas configuradas, configurando respaldo predeterminado (4 horas)")
-                update_data["backup_hours"] = 4
-                update_data["backup_minutes"] = 0
-                update_data["scheduled"] = True
-                AppState.set_backup_time(4, 0)
-                AppState.set_scheduled(True)
-            
-            # Actualizar todo de una vez
-            config_manager.update_program_state(**update_data)
-            
-            # Verificar que se guardó correctamente
-            config_manager.repair_state_file()  # Asegurar que todo se guardó
-            
-            # Verificar contenido del archivo guardado
-            state_after = config_manager.get_program_state()
-            logger.info(f"Configuración guardada exitosamente")
-            
-            messagebox.showinfo("Info", "Configuración avanzada guardada correctamente.")
+            logger.info(f"Configuración guardada: amount={selected_amount}, backup_dir={folder_path}")
+            messagebox.showinfo("Éxito", "Configuración guardada correctamente.", parent=root)
             root.destroy()
             parent_window.deiconify()
+            parent_window.lift()
+            parent_window.focus_force()
 
         except ValueError as e:
-            messagebox.showerror("Error", f"Error en la configuración: {e}")
+            messagebox.showerror("Error", f"Error en la configuración: {e}", parent=root)
+            root.lift()
             root.focus_force()
         except Exception as e:
-            logger.error(f"Error al guardar configuración avanzada: {e}", exc_info=True)
-            messagebox.showerror("Error", f"Error al guardar configuración: {e}")
-            root.destroy()
-            parent_window.deiconify()
+            logger.error(f"Error al guardar configuración: {e}", exc_info=True)
+            messagebox.showerror("Error", f"Error al guardar: {e}", parent=root)
+            root.lift()
+            root.focus_force()
 
-    # Botón para guardar configuración
+    # Frame para botón guardar
+    button_frame = customtkinter.CTkFrame(main_frame, fg_color="transparent")
+    button_frame.pack(pady=15, fill="x", side="bottom")
+    
     save_button = customtkinter.CTkButton(
-        frame, 
-        text="Guardar Configuración", 
-        command=save_advanced_settings, 
-        fg_color="green"
+        button_frame,
+        text="Guardar Configuración",
+        width=200,
+        height=42,
+        fg_color="#28a745",
+        hover_color="#218838",
+        font=("Roboto", 14, "bold"),
+        command=save_advanced_settings
     )
-    save_button.pack(side="bottom", pady=15)
+    save_button.pack(pady=15)
 
-    # Manejo del cierre de la ventana
-    def on_closing() -> None:
+    # Manejo del cierre
+    def on_closing():
         root.destroy()
         parent_window.deiconify()
 
