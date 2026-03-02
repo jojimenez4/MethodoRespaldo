@@ -1605,7 +1605,7 @@ def open_task_assignment_window(parent_window: customtkinter.CTk, on_save_callba
         except ValueError:
             return False
     
-    def create_task_widget(task_data: Optional[dict] = None) -> customtkinter.CTkFrame:
+    def create_task_widget(task_data: Optional[dict] = None) -> Optional[customtkinter.CTkFrame]:
         """Crea un widget para una tarea individual."""
         if len(task_widgets) >= 3:
             messagebox.showwarning("Límite alcanzado", "No se pueden agregar más de 3 tareas.")
