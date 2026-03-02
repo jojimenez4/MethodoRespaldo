@@ -1530,11 +1530,17 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
         if AppState.app_icon:
             AppState.app_icon.stop()
             
-        # Guardar estado actual (NO modificar scheduled para que el servicio lo mantenga)
-        program_state["running"] = False
-        program_state["status"] = "stopped"
-        # NOTA: No modificamos program_state["scheduled"] para preservar la configuración del usuario
-        save_state(STATUS_PROGRAM, program_state)
+        # Usar ConfigManager para actualizar solo los campos necesarios sin perder configuración
+        try:
+            from config_manager import ConfigManager
+            cm = ConfigManager()
+            cm.update_program_state(
+                running=False,
+                status="stopped"
+            )
+            logger.info("Estado guardado correctamente al cerrar la aplicación")
+        except Exception as e:
+            logger.error(f"Error al guardar estado al cerrar: {e}")
         
         root.destroy()
 
@@ -2220,12 +2226,17 @@ def create_system_tray_icon() -> None:
     
     def exit_app(icon, item) -> None:
         """Cierra la aplicación desde la bandeja del sistema."""
-        # Guardar estado antes de cerrar (NO modificar scheduled para que el servicio lo mantenga)
-        if program_state:
-            program_state["running"] = False
-            program_state["status"] = "stopped"
-            # NOTA: No modificamos program_state["scheduled"] para preservar la configuración del usuario
-            save_state(STATUS_PROGRAM, program_state)
+        # Usar ConfigManager para actualizar solo los campos necesarios sin perder configuración
+        try:
+            from config_manager import ConfigManager
+            cm = ConfigManager()
+            cm.update_program_state(
+                running=False,
+                status="stopped"
+            )
+            logger.info("Estado guardado correctamente al cerrar desde bandeja")
+        except Exception as e:
+            logger.error(f"Error al guardar estado al cerrar desde bandeja: {e}")
         
         # Detener programador y threads (solo en memoria, no en archivo)
         AppState.running = False
