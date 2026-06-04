@@ -86,7 +86,7 @@ def create_login_interface():
     """Crea la interfaz de inicio de sesión."""
     # Inicializar ConfigManager para crear archivos de configuración
     try:
-        config = ConfigManager()
+        ConfigManager()
         logger.info("Archivos de configuración inicializados")
     except Exception as e:
         logger.warning(f"Error inicializando configuración: {e}")
@@ -547,7 +547,6 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
     def select_file() -> None:
         nonlocal file_path
         selected_path = filedialog.askopenfilename(filetypes=[("7-Zip Files", "*.7z"), ("All Files", "*.*")])
-        parent = file_window
         if selected_path:
             file_path = selected_path
             file_label.configure(text=f"Archivo: {Path(selected_path).name}")
@@ -595,8 +594,6 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
 
     # Desencriptar archivo
     def decrypt_file() -> None:
-        nonlocal file_path, output_dir
-        
         if not file_path:
             messagebox.showerror("Error", "No se ha seleccionado ningún archivo.")
             return
@@ -634,7 +631,7 @@ def open_file_interface(parent_window: customtkinter.CTk) -> None:
                 # Actualizar UI en el hilo principal
                 file_window.after(0, lambda: complete_decrypt(success, message))
             except Exception as e:
-                file_window.after(0, lambda: complete_decrypt(False, str(e)))
+                file_window.after(0, lambda e=e: complete_decrypt(False, str(e)))
                 
         def complete_decrypt(success, message):
             progress_window.destroy()
@@ -1064,7 +1061,6 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                         
                         # Verificar resultados
                         successful = sum(1 for v in results.values() if v)
-                        total = len(results)
                         result = successful > 0  # True si al menos uno fue exitoso
                         
                         # El log de completado ya se genera en backup_manager.backup_all_servers()
@@ -1074,7 +1070,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                             
                     except Exception as e:
                         # Manejar errores en el hilo principal
-                        progress_window.after(0, lambda: handle_error(e))
+                        progress_window.after(0, lambda e=e: handle_error(e))
             else:
                 # Modo Legado: usar server_data tradicional (compatibilidad hacia atrás)
                 def run_backup() -> None:
@@ -1108,7 +1104,7 @@ def open_backup_interface(server_data: Dict[str, Any]) -> None:
                         progress_window.after(0, lambda: completion_tasks(result))
                     except Exception as e:
                         # Manejar errores en el hilo principal
-                        progress_window.after(0, lambda: handle_error(e))
+                        progress_window.after(0, lambda e=e: handle_error(e))
             
             # Iniciar el proceso de respaldo en un hilo separado
             backup_thread = threading.Thread(target=run_backup, daemon=True)
@@ -1639,8 +1635,6 @@ def open_task_assignment_window(parent_window: customtkinter.CTk, on_save_callba
         minute_var = customtkinter.StringVar(value=initial_minute)
         enabled_var = customtkinter.BooleanVar(value=task_data.get("enabled", True) if task_data else True)
         
-        current_type = {"value": initial_type}
-        
         # Tipo de tarea (con nombres legibles)
         type_combo = customtkinter.CTkComboBox(
             task_frame,
@@ -1908,8 +1902,8 @@ def open_task_assignment_window(parent_window: customtkinter.CTk, on_save_callba
                         "minute": minute,
                         "enabled": enabled
                     })
-            except ValueError as e:
-                messagebox.showerror("Error", f"Ingrese solo números válidos en los campos de tiempo.", parent=task_window)
+            except ValueError:
+                messagebox.showerror("Error", "Ingrese solo números válidos en los campos de tiempo.", parent=task_window)
                 task_window.lift()
                 task_window.focus_force()
                 return

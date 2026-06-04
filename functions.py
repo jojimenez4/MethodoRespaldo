@@ -643,7 +643,7 @@ def backup_mysql_database(
             try:
                 # Intentar eliminar el archivo existente
                 seven_zip_file_path.unlink()
-            except Exception as e:
+            except Exception:
                 # Si no se puede eliminar, usar un nombre alternativo
                 unique_id = str(uuid.uuid4())[:8]
                 seven_zip_file_name = f"{client}_{device}_backup_{timestamp_with_millis}_{unique_id}.7z"
@@ -876,7 +876,7 @@ def backup_sqlserver_database(
                 temp_dir = temp_test_dir
                 break
                 
-            except Exception as e:
+            except Exception:
                 continue
         
         if not temp_dir:
@@ -1515,13 +1515,13 @@ def diagnose_encryption_issues(encrypted_password: str) -> Dict[str, Any]:
             diagnosis["is_base64_valid"] = True
             diagnosis["length_after_decode"] = len(decoded)
             diagnosis["has_minimum_length"] = len(decoded) >= 33
-        except Exception as e:
+        except Exception:
             diagnosis["suggestions"].append("Los datos no son base64 válido")
             return diagnosis
             
         # Intentar desencriptar
         try:
-            decrypted = decrypt(KEY, encrypted_password)
+            decrypt(KEY, encrypted_password)
             diagnosis["decryption_successful"] = True
         except Exception as e:
             diagnosis["decryption_error"] = str(e)

@@ -337,7 +337,7 @@ def run_as_service():
                     logger.removeHandler(handler)
                     
             logger.info("Configuración de logging en modo servicio completada")
-    except Exception as e:
+    except Exception:
         # No podemos usar logger aquí si falló la configuración
         pass
     
@@ -521,7 +521,6 @@ def initialize_app():
             """
             parent_info = "N/A"
             session_id = -1
-            is_interactive = True
             
             # Método 1: Obtener Session ID - servicios corren en sesión 0
             try:
@@ -538,15 +537,13 @@ def initialize_app():
                 import ctypes
                 user32 = ctypes.windll.user32
                 # GetProcessWindowStation retorna NULL para servicios sin estación
-                hwinsta = user32.GetProcessWindowStation()
-                is_interactive = hwinsta != 0
+                user32.GetProcessWindowStation()
             except:
-                is_interactive = True
+                pass
             
             # Método 3: Verificar proceso padre/abuelo
             if PSUTIL_AVAILABLE:
                 try:
-                    import psutil
                     current = psutil.Process()
                     parent = current.parent()
                     
