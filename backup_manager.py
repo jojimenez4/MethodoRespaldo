@@ -229,7 +229,6 @@ class BackupScheduler:
                 schedule.run_pending()
                 
                 # Verificar si han pasado más de 5 minutos desde la última ejecución programada
-                current_time = time.time()
                 jobs = schedule.get_jobs("scheduled_backup")
                 
                 if jobs and self._last_execution > 0:
@@ -489,7 +488,6 @@ class BackupManager:
             
             # Generar nombres únicos para los archivos
             unique_id = str(uuid.uuid4())[:8]
-            backup_file_name = f"{client}_{device}_backup_{timestamp}.sql"
             
             # Detectar rutas automáticamente
             mysql_bin_path = find_mysql_bin_path()
@@ -593,7 +591,7 @@ class BackupManager:
                     # Intentar eliminar el archivo existente
                     seven_zip_file_path.unlink()
                     logger.info(f"Archivo existente eliminado: {seven_zip_file_path}")
-                except Exception as e:
+                except Exception:
                     # Si no se puede eliminar, usar un nombre alternativo
                     unique_id = str(uuid.uuid4())[:8]
                     seven_zip_file_name = f"{client}_{device}_backup_{timestamp_with_millis}_{process_id}_{unique_id}.7z"

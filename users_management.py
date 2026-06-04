@@ -156,8 +156,6 @@ class UserManagementWindow:
             username: Nombre de usuario
             alternate_color: Si se debe usar color alternativo
         """
-        bg_color = "#2b2b2b" if alternate_color else "#222222"
-        
         user_frame = customtkinter.CTkFrame(self.users_list_frame)
         user_frame.pack(fill="x", pady=2)
         
